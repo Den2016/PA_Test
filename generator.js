@@ -121,6 +121,11 @@ class GCodeGenerator {
     this.currentX = 0;
     this.currentY = 0;
     this.isRetracted = false;
+    this.dynamicPlaceholders = {};
+  }
+  
+  setPlaceholders(placeholders) {
+    this.dynamicPlaceholders = placeholders || {};
   }
 
   addRetract(gcode, configs) {
@@ -248,7 +253,6 @@ class GCodeGenerator {
     if (!template) return '';
     
     this.variables = {...configs};
-    const errors = [];
     
     if (this.variables.bed_shape) {
       const bedBounds = this.calculateBedBounds(this.variables.bed_shape);
@@ -257,55 +261,40 @@ class GCodeGenerator {
       }
     }
     
+    // Нормализуем переменные в массивы
     for (const [key, value] of Object.entries(this.variables)) {
       if (typeof value === 'string') {
-        if (value.includes(';')) {
-          this.variables[key] = value.split(';');
-        } else {
-          this.variables[key] = [value];
-        }
-      } else if (Array.isArray(value)) {
-        this.variables[key] = value;
+        this.variables[key] = value.includes(';') ? value.split(';') : [value];
+      } else if (!Array.isArray(value)) {
+        this.variables[key] = [value];
       }
     }
     
-    let processedTemplate = template.replace(/\{if\s*\(([^)]+)\)\}([^{]*?)\{else\}([^{]*?)\{endif\}/g, (match, condition, ifContent, elseContent) => {
-      let evalCondition = condition;
-      
-      for (const [key, value] of Object.entries(this.variables)) {
-        for (let idx = 0; idx < 10; idx++) {
-          evalCondition = evalCondition.replace(new RegExp(`\\b${key}\\[${idx}\\]`, 'g'), value[idx] || '0');
-          evalCondition = evalCondition.replace(new RegExp(`\\b${key}_${idx}\\b`, 'g'), value[idx] || '0');
-        }
-        evalCondition = evalCondition.replace(new RegExp(`\\b${key}\\b(?!\\[|_)`, 'g'), value[0] || '0');
-      }
-      
-      evalCondition = evalCondition.replace(/==/g, '===').replace(/\btrue\b/g, '1').replace(/\bfalse\b/g, '0');
-
-      try {
-        const conditionResult = eval(evalCondition);
-        return conditionResult ? ifContent : elseContent;
-      } catch (e) {
-        return elseContent;
-      }
-    });
+    // Добавляем отсутствующие переменные
+    if (!this.variables.max_layer_z) {
+      this.variables.max_layer_z = ['5.0']; // 25 слоев * 0.2мм
+    }
+    if (!this.variables.max_print_height) {
+      this.variables.max_print_height = ['250']; // По умолчанию
+    }
+    if (!this.variables.total_layer_count) {
+      this.variables.total_layer_count = ['25']; // Количество слоев PA теста
+    }
     
-    const templateLines = processedTemplate.split('\\n');
+    // Обрабатываем условные блоки построчно
+    const lines = template.split('\n');
     const resultLines = [];
     let skipLines = false;
     let ifStack = [];
     
-    for (let i = 0; i < templateLines.length; i++) {
-      const line = templateLines[i];
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
       
-      const ifMatch = line.match(/\{if\s+(.+)\}/);
-      const elseMatch = line.match(/\{else\}/);
-      const endifMatch = line.match(/\{endif\}/);
-      
-      if (ifMatch) {
-        const condition = ifMatch[1];
+      // Обрабатываем условные блоки в строке
+      line = line.replace(/\{if\s+([^}]+)\}([^{]*?)\{endif\}/g, (match, condition, content) => {
         let evalCondition = condition;
         
+        // Заменяем переменные
         for (const [key, value] of Object.entries(this.variables)) {
           for (let idx = 0; idx < 10; idx++) {
             evalCondition = evalCondition.replace(new RegExp(`\\b${key}\\[${idx}\\]`, 'g'), value[idx] || '0');
@@ -314,7 +303,37 @@ class GCodeGenerator {
           evalCondition = evalCondition.replace(new RegExp(`\\b${key}\\b(?!\\[|_)`, 'g'), value[0] || '0');
         }
         
-        evalCondition = evalCondition.replace(/==/g, '===').replace(/\btrue\b/g, '1').replace(/\bfalse\b/g, '0');
+        evalCondition = evalCondition.replace(/</g, ' < ').replace(/>/g, ' > ');
+        evalCondition = evalCondition.replace(/\btrue\b/g, '1').replace(/\bfalse\b/g, '0');
+        
+        try {
+          const conditionResult = eval(evalCondition);
+          return conditionResult ? content : '';
+        } catch (e) {
+          return '';
+        }
+      });
+      
+      // Проверяем многострочные условные конструкции
+      const ifMatch = line.match(/\{if\s+([^}]+)\}/);
+      const elseMatch = line.match(/\{else\}/);
+      const endifMatch = line.match(/\{endif\}/);
+      
+      if (ifMatch) {
+        const condition = ifMatch[1];
+        let evalCondition = condition;
+        
+        // Заменяем переменные
+        for (const [key, value] of Object.entries(this.variables)) {
+          for (let idx = 0; idx < 10; idx++) {
+            evalCondition = evalCondition.replace(new RegExp(`\\b${key}\\[${idx}\\]`, 'g'), value[idx] || '0');
+            evalCondition = evalCondition.replace(new RegExp(`\\b${key}_${idx}\\b`, 'g'), value[idx] || '0');
+          }
+          evalCondition = evalCondition.replace(new RegExp(`\\b${key}\\b(?!\\[|_)`, 'g'), value[0] || '0');
+        }
+        
+        evalCondition = evalCondition.replace(/</g, ' < ').replace(/>/g, ' > ');
+        evalCondition = evalCondition.replace(/\btrue\b/g, '1').replace(/\bfalse\b/g, '0');
         
         try {
           const conditionResult = eval(evalCondition);
@@ -347,85 +366,84 @@ class GCodeGenerator {
       }
     }
     
-    const lines = resultLines.map(line => {
-      try {
-        line = line.replace(/\{([^}]+)\}/g, (match, expression) => {
-          try {
-            const assignMatch = expression.match(/^([^=]+)\s*=\s*(.+)$/);
-            if (assignMatch) {
-              let varName = assignMatch[1].trim();
-              const expr = assignMatch[2].trim();
-              
-              const indexMatch = varName.match(/^(.+)\[(\d+)\]$/);
-              let baseVarName = varName;
-              let index = 0;
-              if (indexMatch) {
-                baseVarName = indexMatch[1];
-                index = parseInt(indexMatch[2]);
-              }
-              
-              let evalExpr = expr;
-              for (const [key, value] of Object.entries(this.variables)) {
-                for (let i = 0; i < 10; i++) {
-                  evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\[${i}\\]`, 'g'), value[i] || '0');
-                  evalExpr = evalExpr.replace(new RegExp(`\\b${key}_${i}\\b`, 'g'), value[i] || '0');
-                }
-                evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\b(?!\\[|_)`, 'g'), value[0] || '0');
-              }
-              
-              evalExpr = evalExpr.replace(/\bmax\(/g, 'Math.max(');
-              evalExpr = evalExpr.replace(/\bmin\(/g, 'Math.min(');
-              
-              const result = eval(evalExpr);
-              
-              if (!this.variables[baseVarName]) {
-                this.variables[baseVarName] = [];
-              }
-              this.variables[baseVarName][index] = result;
-              
-              return '';
-            } else {
-              let evalExpr = expression;
-              for (const [key, value] of Object.entries(this.variables)) {
-                for (let i = 0; i < 10; i++) {
-                  evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\[${i}\\]`, 'g'), value[i] || '0');
-                  evalExpr = evalExpr.replace(new RegExp(`\\b${key}_${i}\\b`, 'g'), value[i] || '0');
-                }
-                evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\b(?!\\[|_)`, 'g'), value[0] || '0');
-              }
-              return eval(evalExpr);
+    // Обрабатываем плейсхолдеры
+    const finalLines = resultLines.map(line => {
+      // Обрабатываем плейсхолдеры в фигурных скобках {}
+      line = line.replace(/\{([^}]+)\}/g, (match, expression) => {
+        try {
+          // Проверяем на присваивание
+          const assignMatch = expression.match(/^([^=]+)\s*=\s*(.+)$/);
+          if (assignMatch) {
+            let varName = assignMatch[1].trim();
+            const expr = assignMatch[2].trim();
+            
+            // Обрабатываем индексы массивов
+            const indexMatch = varName.match(/^(.+)\[(\d+)\]$/);
+            let baseVarName = varName;
+            let index = 0;
+            if (indexMatch) {
+              baseVarName = indexMatch[1];
+              index = parseInt(indexMatch[2]);
             }
-          } catch (e) {
-            errors.push(`Error in expression "${expression}": ${e.message}`);
-            return match;
-          }
-        });
-        
-        line = line.replace(/\[([^\]]+)\]/g, (match, variable) => {
-          const underscoreMatch = variable.match(/^(.+)_(\d+)$/);
-          if (underscoreMatch) {
-            const baseVar = underscoreMatch[1];
-            const index = parseInt(underscoreMatch[2]);
-            const value = this.variables[baseVar];
-            if (Array.isArray(value)) {
-              return value[index] || '0';
+            
+            let evalExpr = expr;
+            // Заменяем переменные
+            for (const [key, value] of Object.entries(this.variables)) {
+              for (let i = 0; i < 10; i++) {
+                evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\[${i}\\]`, 'g'), value[i] || '0');
+                evalExpr = evalExpr.replace(new RegExp(`\\b${key}_${i}\\b`, 'g'), value[i] || '0');
+              }
+              evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\b(?!\\[|_)`, 'g'), value[0] || '0');
             }
+            
+            evalExpr = evalExpr.replace(/\bmax\(/g, 'Math.max(');
+            evalExpr = evalExpr.replace(/\bmin\(/g, 'Math.min(');
+            
+            const result = eval(evalExpr);
+            
+            // Сохраняем результат
+            if (!this.variables[baseVarName]) {
+              this.variables[baseVarName] = [];
+            }
+            this.variables[baseVarName][index] = result;
+            
+            return ''; // Присваивание не выводит текст
+          } else {
+            // Обычное выражение
+            let evalExpr = expression;
+            
+            // Заменяем переменные
+            for (const [key, value] of Object.entries(this.variables)) {
+              for (let i = 0; i < 10; i++) {
+                evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\[${i}\\]`, 'g'), value[i] || '0');
+                evalExpr = evalExpr.replace(new RegExp(`\\b${key}_${i}\\b`, 'g'), value[i] || '0');
+              }
+              evalExpr = evalExpr.replace(new RegExp(`\\b${key}\\b(?!\\[|_)`, 'g'), value[0] || '0');
+            }
+            
+            // Обрабатываем математические выражения
+            evalExpr = evalExpr.replace(/\bmax\(/g, 'Math.max(');
+            evalExpr = evalExpr.replace(/\bmin\(/g, 'Math.min(');
+            
+            return eval(evalExpr);
           }
-          return this.variables[variable] || match;
-        });
-        
-        return line;
-      } catch (e) {
-        errors.push(`Error processing line "${line}": ${e.message}`);
-        return line;
-      }
+        } catch (e) {
+          return match;
+        }
+      });
+      
+      // Обрабатываем плейсхолдеры в квадратных скобках [] (для Klipper)
+      line = line.replace(/\[([^\]]+)\]/g, (match, varName) => {
+        if (this.variables[varName]) {
+          return this.variables[varName][0] || '0';
+        }
+        return match;
+      });
+      
+      return line;
     });
     
-    if (errors.length > 0) {
-      throw new Error(errors.join('\n'));
-    }
-    
-    return lines.join('\n');
+    return finalLines.join('\n').replace(/\\n/g, '\n');
   }
 
   calculateExtrusion(length, width, height, filamentDiameter, multiplier = 1) {
@@ -1411,7 +1429,7 @@ class GCodeGenerator {
     }
     
     // Теперь обрабатываем шаблоны с полученными переменными
-    const configsWithVariables = {...allConfigs, ...this.variables};
+    const configsWithVariables = {...allConfigs, ...this.variables, ...this.dynamicPlaceholders};
     const startGCode = this.processGCodeTemplate(printerConfig.start_gcode, configsWithVariables);
     const filamentGCode = this.processGCodeTemplate(filamentConfig.start_filament_gcode, configsWithVariables);
     const endGCode = this.processGCodeTemplate(printerConfig.end_gcode, configsWithVariables);

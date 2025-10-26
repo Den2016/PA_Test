@@ -182,7 +182,7 @@ input[type="number"]:focus {
   border: 1px solid #e1e5e9;
   border-radius: 6px;
   font-family: 'Courier New', monospace;
-  font-size: 11px;
+  font-size: 13px;
   resize: vertical;
 }
 

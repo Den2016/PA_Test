@@ -296,6 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   selPrinter.addEventListener('change', (e) => {
     const printerName = e.target.value;
+    clearGeneratedGCode();
     if (printerName) {
       selectedPrinter = parsePrinterName(printerName);
       initializePrinterSelection();
@@ -306,11 +307,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  function clearGeneratedGCode() {
+    document.getElementById('gcodeOutput').value = '';
+    document.getElementById('saveBtn').disabled = true;
+    document.getElementById('sendBtn').disabled = true;
+  }
+
   selFilament.addEventListener('change', (e) => {
+    clearGeneratedGCode();
     updatePrintSettings();
   });
 
   selPrint.addEventListener('change', (e) => {
+    clearGeneratedGCode();
     updateFilaments();
   });
 
@@ -790,9 +799,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return bestLayout;
   }
 
-  document.getElementById('startPA').addEventListener('input', calculatePACount);
-  document.getElementById('endPA').addEventListener('input', calculatePACount);
-  document.getElementById('stepPA').addEventListener('input', calculatePACount);
+  document.getElementById('startPA').addEventListener('input', () => {
+    clearGeneratedGCode();
+    calculatePACount();
+  });
+  document.getElementById('endPA').addEventListener('input', () => {
+    clearGeneratedGCode();
+    calculatePACount();
+  });
+  document.getElementById('stepPA').addEventListener('input', () => {
+    clearGeneratedGCode();
+    calculatePACount();
+  });
   
   calculatePACount();
   
@@ -878,6 +896,108 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
+  function calculateGCodePlaceholders() {
+    try {
+      if (!selectedPrinter || !selPrint.value) return {};
+      
+      const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
+      const filamentConfigPath = path.join(currentSlicerPath, 'filament', selFilament.value + '.ini');
+      const printerConfig = parseIniFile(printerConfigPath);
+      const filamentConfig = parseIniFile(filamentConfigPath);
+      
+      // Получаем параметры PA теста
+      const startPA = parseFloat(document.getElementById('startPA').value) || 0;
+      const endPA = parseFloat(document.getElementById('endPA').value) || 0;
+      const stepPA = parseFloat(document.getElementById('stepPA').value) || 0.001;
+      const paValues = [];
+      for (let value = startPA; value <= endPA; value += stepPA) {
+        paValues.push(parseFloat(value.toFixed(3)));
+      }
+      
+      // Размеры объектов
+      const nozzleDiameter = parseFloat(printerConfig.nozzle_diameter?.split(';')[0] || '0.4');
+      let objectWidth, objectHeight;
+      if (nozzleDiameter <= 0.4) {
+        objectWidth = 30; objectHeight = 20;
+      } else if (nozzleDiameter <= 0.6) {
+        objectWidth = 35; objectHeight = 25;
+      } else {
+        objectWidth = 40; objectHeight = 30;
+      }
+      
+      // Получаем размеры стола
+      const bedShape = printerConfig.bed_shape;
+      if (!bedShape) return {};
+      
+      const points = bedShape.split(',').map(point => {
+        const [x, y] = point.split('x').map(Number);
+        return { x, y };
+      });
+      
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const bedWidth = Math.max(...xs) - Math.min(...xs);
+      const bedHeight = Math.max(...ys) - Math.min(...ys);
+      
+      // Рассчитываем расположение объектов
+      const spacing = 5;
+      const layout = calculateOptimalLayout(paValues.length, objectWidth, objectHeight, spacing, bedWidth, bedHeight);
+      
+      if (!layout) return {};
+      
+      // Границы печати
+      const printMinX = layout.startX;
+      const printMaxX = layout.startX + layout.totalWidth;
+      const printMinY = layout.startY;
+      const printMaxY = layout.startY + layout.totalHeight;
+      
+      // Расчет материала
+      const layerHeight = parseFloat(filamentConfig.layer_height || '0.2');
+      const filamentDiameter = parseFloat(filamentConfig.filament_diameter || '1.75');
+      const filamentDensity = parseFloat(filamentConfig.filament_density || '1.24'); // PLA по умолчанию
+      const filamentCost = parseFloat(filamentConfig.filament_cost || '25'); // за кг
+      
+      // Примерный объем филамента (упрощенный расчет)
+      const layerCount = 25;
+      const volumePerObject = objectWidth * objectHeight * layerHeight * layerCount * 0.3; // 30% заполнение
+      const totalVolume = volumePerObject * paValues.length; // мм³
+      
+      const filamentCrossSectionArea = Math.PI * Math.pow(filamentDiameter / 2, 2);
+      const filamentLength = totalVolume / filamentCrossSectionArea; // мм
+      const filamentWeight = (totalVolume / 1000) * filamentDensity; // граммы
+      const materialCost = (filamentWeight / 1000) * filamentCost; // стоимость
+      
+      return {
+        // Границы печати
+        'first_layer_print_min[0]': printMinX.toFixed(2),
+        'first_layer_print_max[0]': printMaxX.toFixed(2),
+        'first_layer_print_min[1]': printMinY.toFixed(2),
+        'first_layer_print_max[1]': printMaxY.toFixed(2),
+        'print_bed_min[0]': printMinX.toFixed(2),
+        'print_bed_max[0]': printMaxX.toFixed(2),
+        'print_bed_min[1]': printMinY.toFixed(2),
+        'print_bed_max[1]': printMaxY.toFixed(2),
+        'bounding_box[0]': layout.totalWidth.toFixed(2),
+        'bounding_box[1]': layout.totalHeight.toFixed(2),
+        
+        // Материал
+        'filament_used[0]': filamentLength.toFixed(1),
+        'filament_weight[0]': filamentWeight.toFixed(2),
+        'filament_cost[0]': materialCost.toFixed(2),
+        'total_weight': filamentWeight.toFixed(2),
+        'total_cost': materialCost.toFixed(2),
+        
+        // Дополнительные
+        'object_count': paValues.length.toString(),
+        'pa_range': `${startPA}-${endPA}`,
+        'pa_step': stepPA.toString()
+      };
+    } catch (e) {
+      console.error('Ошибка расчета плейсхолдеров:', e);
+      return {};
+    }
+  }
+
   function generateFilename() {
     try {
       const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
@@ -889,16 +1009,24 @@ document.addEventListener('DOMContentLoaded', () => {
       const printConfig = parseIniFile(printConfigPath);
       
       let template = printConfig.output_filename_format || '{input_filename_base}';
-      
       const allConfigs = {...printerConfig, ...filamentConfig, ...printConfig};
       
+      // Базовые плейсхолдеры
       template = template.replace(/\{input_filename_base\}/g, 'PA_Test');
+      template = template.replace(/\{printer_model\}/g, selectedPrinter.name);
+      template = template.replace(/\{printer_preset\}/g, selectedPrinter.name);
+      template = template.replace(/\{filament_preset\}/g, selFilament.value);
+      template = template.replace(/\{print_preset\}/g, selPrint.value);
       
+      // Время печати
       const printTimeMinutes = calculatePrintTime();
       const hours = Math.floor(printTimeMinutes / 60);
       const minutes = printTimeMinutes % 60;
+      const seconds = (printTimeMinutes % 1) * 60;
       template = template.replace(/\{print_time\}/g, `${hours}h${minutes}m`);
+      template = template.replace(/\{total_print_time\}/g, `${hours}h${minutes}m${Math.round(seconds)}s`);
       
+      // Дата и время
       const now = new Date();
       template = template.replace(/\{timestamp\}/g, now.toISOString().replace(/[:.]/g, '-'));
       template = template.replace(/\{year\}/g, now.getFullYear());
@@ -906,22 +1034,63 @@ document.addEventListener('DOMContentLoaded', () => {
       template = template.replace(/\{day\}/g, String(now.getDate()).padStart(2, '0'));
       template = template.replace(/\{hour\}/g, String(now.getHours()).padStart(2, '0'));
       template = template.replace(/\{minute\}/g, String(now.getMinutes()).padStart(2, '0'));
+      template = template.replace(/\{second\}/g, String(now.getSeconds()).padStart(2, '0'));
       
+      // Версия слайсера
+      template = template.replace(/\{version\}/g, 'PA_Generator_1.0');
+      
+      // Материал и настройки
+      const filamentType = allConfigs.filament_type || 'Unknown';
+      const layerHeight = allConfigs.layer_height || '0.2';
+      const nozzleTemp = allConfigs.temperature?.[0] || allConfigs.temperature || '200';
+      const bedTemp = allConfigs.bed_temperature?.[0] || allConfigs.bed_temperature || '60';
+      
+      template = template.replace(/\{filament_type\}/g, filamentType);
+      template = template.replace(/\{layer_height\}/g, layerHeight);
+      template = template.replace(/\{nozzle_temperature\}/g, nozzleTemp);
+      template = template.replace(/\{bed_temperature\}/g, bedTemp);
+      
+      // Функция digits
       template = template.replace(/\{digits\(([^,]+),\s*(\d+),\s*(\d+)\)\}/g, (match, varName, minDigits, precision) => {
         const value = parseFloat(allConfigs[varName] || 0);
         return value.toFixed(parseInt(precision)).padStart(parseInt(minDigits), '0');
       });
       
+      // Функция if
+      template = template.replace(/\{if\s+([^}]+)\}([^{]*?)\{endif\}/g, (match, condition, content) => {
+        try {
+          const evalCondition = condition.replace(/\b(\w+)\b/g, (key) => {
+            const value = allConfigs[key];
+            return isNaN(value) ? `"${value}"` : value;
+          });
+          return eval(evalCondition) ? content : '';
+        } catch (e) {
+          return '';
+        }
+      });
+      
+      // Массивы с индексами
       template = template.replace(/\{([^}]+)\[(\d+)\]\}/g, (match, varName, index) => {
         const value = allConfigs[varName] || '';
         const array = value.split(';');
         return array[parseInt(index)] || value;
       });
       
+      // Динамические плейсхолдеры для G-code
+      const gcodePlaceholders = calculateGCodePlaceholders();
+      for (const [key, value] of Object.entries(gcodePlaceholders)) {
+        const regex = new RegExp(`\\{${key}\\}`, 'g');
+        template = template.replace(regex, value);
+      }
+      
+      // Обычные переменные из конфигов
       for (const [key, value] of Object.entries(allConfigs)) {
         const regex = new RegExp(`\\{${key}\\}`, 'g');
         template = template.replace(regex, value);
       }
+      
+      // Очистка недопустимых символов для имени файла
+      template = template.replace(/[<>:"/\\|?*]/g, '_');
       
       return template.endsWith('.gcode') ? template : template + '.gcode';
     } catch (e) {
@@ -1102,6 +1271,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       const generator = new GCodeGenerator();
+      
+      // Передаем плейсхолдеры в генератор
+      const gcodePlaceholders = calculateGCodePlaceholders();
+      generator.setPlaceholders(gcodePlaceholders);
+      
       const gcode = generator.generate(
         currentSlicerPath,
         selectedPrinter.name,
