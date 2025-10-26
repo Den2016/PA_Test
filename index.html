@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>PA Test Generator</title>
     <link rel="stylesheet" href="main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
 <div class="flex">
@@ -75,10 +77,16 @@
     </div>
 </div>
 
-<div class="container full-width">
-    <h2>G-code</h2>
-    <textarea id="gcodeOutput" class="gcode-output" placeholder="Здесь будет сгенерированный G-code..."></textarea>
-    <button id="saveBtn" class="save-btn" disabled>Сохранить в файл</button>
+<div class="flex">
+    <div class="container w50">
+        <h2>G-code</h2>
+        <textarea id="gcodeOutput" class="gcode-output" placeholder="Здесь будет сгенерированный G-code..."></textarea>
+        <button id="saveBtn" class="save-btn" disabled>Сохранить в файл</button>
+    </div>
+    <div class="container w50">
+        <h2>Предварительный просмотр</h2>
+        <div id="bedVisualization" class="bed-visualization"></div>
+    </div>
 </div>
 <script src="renderer.js"></script>
 </body>

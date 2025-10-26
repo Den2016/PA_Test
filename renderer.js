@@ -10,6 +10,296 @@ let selectedPrinter = null;
 // Путь к файлу настроек
 const settingsPath = path.join(__dirname, 'settings.json');
 
+// 3D визуализация
+class BedVisualizer {
+  constructor() {
+    this.scene = null;
+    this.camera = null;
+    this.renderer = null;
+    this.controls = null;
+    this.bedMesh = null;
+    this.objects = [];
+    this.animationId = null;
+  }
+
+  init(container) {
+    try {
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      // Сцена
+      this.scene = new THREE.Scene();
+      this.scene.background = new THREE.Color(0xf0f0f0);
+
+      // Камера
+      this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+      this.camera.position.set(100, 100, 100);
+
+      // Используем только стабильную 2D визуализацию
+      console.log('Используем 2D визуализацию');
+      this.create2DFallback(container);
+      return;
+      
+      this.renderer.setSize(width, height);
+      container.appendChild(this.renderer.domElement);
+
+    // Контролы
+    this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
+
+    // Освещение
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+    this.scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(50, 100, 50);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    this.scene.add(directionalLight);
+
+      // Запуск анимации
+      this.animate();
+
+      // Обработка изменения размера
+      window.addEventListener('resize', () => this.onWindowResize(container));
+    } catch (e) {
+      console.error('Ошибка инициализации 3D:', e);
+      this.create2DFallback(container);
+    }
+  }
+
+  create2DFallback(container) {
+    this.switchTo2D(container);
+  }
+  
+  switchTo2D(container) {
+    // Очищаем контейнер
+    container.innerHTML = '';
+    
+    // Останавливаем 3D анимацию
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    container.appendChild(canvas);
+    
+    this.canvas2D = canvas;
+    this.ctx2D = ctx;
+    this.is2D = true;
+    
+    // Начальная отрисовка
+    this.draw2D();
+  }
+
+  draw2D() {
+    if (!this.is2D || !this.ctx2D) return;
+    
+    const ctx = this.ctx2D;
+    const canvas = this.canvas2D;
+    
+    // Очищаем канвас
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#f0f0f0';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    if (!this.bedData) return;
+    
+    const { bedWidth, bedHeight, objects = [] } = this.bedData;
+    if (!bedWidth || !bedHeight) return;
+    
+    const scale = Math.min(canvas.width / (bedWidth + 40), canvas.height / (bedHeight + 40));
+    const offsetX = (canvas.width - bedWidth * scale) / 2;
+    const offsetY = (canvas.height - bedHeight * scale) / 2;
+    
+    // Рисуем стол
+    ctx.fillStyle = '#888888';
+    ctx.fillRect(offsetX, offsetY, bedWidth * scale, bedHeight * scale);
+    
+    // Сетка
+    ctx.strokeStyle = '#666666';
+    ctx.lineWidth = 1;
+    const gridSize = 20 * scale;
+    for (let x = offsetX; x <= offsetX + bedWidth * scale; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, offsetY);
+      ctx.lineTo(x, offsetY + bedHeight * scale);
+      ctx.stroke();
+    }
+    for (let y = offsetY; y <= offsetY + bedHeight * scale; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(offsetX, y);
+      ctx.lineTo(offsetX + bedWidth * scale, y);
+      ctx.stroke();
+    }
+    
+    // Рисуем объекты
+    if (objects.length > 0) {
+      objects.forEach((obj, i) => {
+        const x = offsetX + obj.x * scale;
+        const y = offsetY + obj.y * scale;
+        const w = obj.width * scale;
+        const h = obj.height * scale;
+        
+        // Цвет объекта
+        const hue = (i / objects.length) * 240;
+        ctx.fillStyle = `hsl(${hue}, 70%, 60%)`;
+        ctx.fillRect(x, y, w, h);
+        
+        // Обводка
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+        
+        // Текст
+        ctx.fillStyle = '#000';
+        ctx.font = `${Math.max(10, w / 8)}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`PA: ${obj.pa}`, x + w/2, y + h/2 + 4);
+      });
+    }
+  }
+
+  createBed(width, height) {
+    if (this.is2D) {
+      // Для 2D просто сохраняем размеры
+      if (!this.bedData) this.bedData = { objects: [] };
+      this.bedData.bedWidth = width;
+      this.bedData.bedHeight = height;
+      if (!this.bedData.objects) this.bedData.objects = [];
+      this.draw2D();
+      return;
+    }
+
+    if (this.bedMesh) {
+      this.scene.remove(this.bedMesh);
+    }
+
+    const bedGeometry = new THREE.BoxGeometry(width, 2, height);
+    const bedMaterial = new THREE.MeshLambertMaterial({ color: 0x888888 });
+    this.bedMesh = new THREE.Mesh(bedGeometry, bedMaterial);
+    this.bedMesh.position.set(width/2, -1, height/2);
+    this.bedMesh.receiveShadow = true;
+    this.scene.add(this.bedMesh);
+
+    const gridHelper = new THREE.GridHelper(Math.max(width, height), 20, 0x444444, 0x666666);
+    gridHelper.position.set(width/2, 0, height/2);
+    this.scene.add(gridHelper);
+  }
+
+  updateObjects(bedWidth, bedHeight, paValues, layout, objectWidth, objectHeight) {
+    if (this.is2D) {
+      // 2D визуализация
+      const objects = [];
+      if (layout && paValues.length) {
+        for (let i = 0; i < paValues.length; i++) {
+          const row = Math.floor(i / layout.cols);
+          const col = i % layout.cols;
+          const x = layout.startX + col * (objectWidth + 5);
+          const y = layout.startY + row * (objectHeight + 5);
+          
+          objects.push({
+            x, y,
+            width: objectWidth,
+            height: objectHeight,
+            pa: paValues[i]
+          });
+        }
+      }
+      
+      this.bedData = { bedWidth, bedHeight, objects };
+      this.draw2D();
+      return;
+    }
+
+    // 3D визуализация
+    this.objects.forEach(obj => this.scene.remove(obj));
+    this.objects = [];
+
+    if (!layout || !paValues.length) return;
+
+    for (let i = 0; i < paValues.length; i++) {
+      const row = Math.floor(i / layout.cols);
+      const col = i % layout.cols;
+      const x = layout.startX + col * (objectWidth + 5) + objectWidth/2;
+      const z = layout.startY + row * (objectHeight + 5) + objectHeight/2;
+      
+      const objectGeometry = new THREE.BoxGeometry(objectWidth, 5, objectHeight);
+      const hue = (i / paValues.length) * 0.7;
+      const objectMaterial = new THREE.MeshLambertMaterial({ 
+        color: new THREE.Color().setHSL(hue, 0.7, 0.6) 
+      });
+      const objectMesh = new THREE.Mesh(objectGeometry, objectMaterial);
+      objectMesh.position.set(x, 2.5, z);
+      objectMesh.castShadow = true;
+      this.scene.add(objectMesh);
+      this.objects.push(objectMesh);
+
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = 128;
+      canvas.height = 64;
+      context.fillStyle = 'white';
+      context.fillRect(0, 0, 128, 64);
+      context.fillStyle = 'black';
+      context.font = '16px Arial';
+      context.textAlign = 'center';
+      context.fillText(`PA: ${paValues[i]}`, 64, 32);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      const textMaterial = new THREE.MeshBasicMaterial({ map: texture });
+      const textGeometry = new THREE.PlaneGeometry(objectWidth * 0.8, objectHeight * 0.4);
+      const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+      textMesh.position.set(x, 5.1, z);
+      textMesh.rotation.x = -Math.PI / 2;
+      this.scene.add(textMesh);
+      this.objects.push(textMesh);
+    }
+  }
+
+  animate() {
+    if (this.is2D) return; // Не анимируем в 2D режиме
+    
+    this.animationId = requestAnimationFrame(() => this.animate());
+    
+    try {
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+    } catch (e) {
+      console.warn('WebGL ошибка рендеринга:', e.message);
+      // Переход на 2D при ошибке рендеринга
+      this.switchTo2D(document.getElementById('bedVisualization'));
+    }
+  }
+
+  onWindowResize(container) {
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height);
+  }
+
+  destroy() {
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId);
+    }
+    if (this.renderer) {
+      this.renderer.dispose();
+    }
+  }
+}
+
+let bedVisualizer = null;
+
 document.addEventListener('DOMContentLoaded', () => {
   const selSlicer = document.getElementById('selSlicer');
   const selPrinter = document.getElementById('selPrinter');
@@ -404,6 +694,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function calculatePACount() {
+    console.log('calculatePACount called');
     const startPA = parseFloat(document.getElementById('startPA').value) || 0;
     const endPA = parseFloat(document.getElementById('endPA').value) || 0;
     const stepPA = parseFloat(document.getElementById('stepPA').value) || 0.001;
@@ -431,6 +722,108 @@ document.addEventListener('DOMContentLoaded', () => {
     
     document.getElementById('countDisplay').textContent = displayText;
     document.getElementById('paValues').textContent = values.join(', ');
+    
+    // Обновляем 3D визуализацию
+    updateBedVisualization(values);
+  }
+  
+  function updateBedVisualization(paValues) {
+    console.log('updateBedVisualization called:', {
+      selectedPrinter: !!selectedPrinter,
+      selPrintValue: selPrint.value,
+      paValuesLength: paValues ? paValues.length : 0,
+      bedVisualizerExists: !!bedVisualizer
+    });
+    
+    if (!selectedPrinter || !selPrint.value) {
+      console.log('updateBedVisualization: missing printer or print settings');
+      return;
+    }
+    
+    // Если визуализатор еще не создан, создаем его
+    if (!bedVisualizer) {
+      console.log('Creating bedVisualizer...');
+      const bedContainer = document.getElementById('bedVisualization');
+      bedVisualizer = new BedVisualizer();
+      bedVisualizer.init(bedContainer);
+    }
+    
+    try {
+      const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
+      const printerConfig = parseIniFile(printerConfigPath);
+      
+      const bedShape = printerConfig.bed_shape;
+      if (!bedShape) return;
+      
+      const points = bedShape.split(',').map(point => {
+        const [x, y] = point.split('x').map(Number);
+        return { x, y };
+      });
+      
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const bedWidth = Math.max(...xs) - Math.min(...xs);
+      const bedHeight = Math.max(...ys) - Math.min(...ys);
+      
+      const nozzleDiameter = parseFloat(printerConfig.nozzle_diameter?.split(';')[0] || '0.4');
+      
+      let objectWidth, objectHeight;
+      if (nozzleDiameter <= 0.4) {
+        objectWidth = 30;
+        objectHeight = 20;
+      } else if (nozzleDiameter <= 0.6) {
+        objectWidth = 35;
+        objectHeight = 25;
+      } else {
+        objectWidth = 40;
+        objectHeight = 30;
+      }
+      
+      const spacing = 5;
+      
+      // Рассчитываем оптимальное расположение
+      const layout = calculateOptimalLayout(paValues.length, objectWidth, objectHeight, spacing, bedWidth, bedHeight);
+      
+      // Обновляем визуализацию
+      bedVisualizer.createBed(bedWidth, bedHeight);
+      bedVisualizer.updateObjects(bedWidth, bedHeight, paValues, layout, objectWidth, objectHeight);
+    } catch (e) {
+      console.error('Ошибка обновления визуализации:', e);
+    }
+  }
+  
+  function calculateOptimalLayout(objectCount, objectWidth, objectHeight, spacing, bedWidth, bedHeight) {
+    const margin = 10;
+    const availableWidth = bedWidth - 2 * margin;
+    const availableHeight = bedHeight - 2 * margin;
+    
+    let bestLayout = null;
+    let minAspectRatio = Infinity;
+    
+    for (let cols = 1; cols <= objectCount; cols++) {
+      const rows = Math.ceil(objectCount / cols);
+      
+      const totalWidth = cols * objectWidth + (cols - 1) * spacing;
+      const totalHeight = rows * objectHeight + (rows - 1) * spacing;
+      
+      if (totalWidth <= availableWidth && totalHeight <= availableHeight) {
+        const aspectRatio = Math.max(totalWidth / totalHeight, totalHeight / totalWidth);
+        
+        if (aspectRatio < minAspectRatio) {
+          minAspectRatio = aspectRatio;
+          bestLayout = {
+            cols,
+            rows,
+            totalWidth,
+            totalHeight,
+            startX: margin + (availableWidth - totalWidth) / 2,
+            startY: margin + (availableHeight - totalHeight) / 2
+          };
+        }
+      }
+    }
+    
+    return bestLayout;
   }
 
   // Добавляем обработчики для PA параметров
@@ -449,6 +842,8 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Загружаем сохраненные настройки при запуске
   loadSettings();
+  
+  // Визуализатор создается лениво при первом обращении
   
   // Сохраняем настройки при закрытии окна
   window.addEventListener('beforeunload', saveSettings);
@@ -719,6 +1114,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (printerSettings.print && selPrint.querySelector(`option[value="${printerSettings.print}"]`)) {
                   selPrint.value = printerSettings.print;
                 }
+                // Обновляем визуализацию после загрузки всех настроек
+                setTimeout(() => {
+                  console.log('Final settings loaded, forcing visualization update');
+                  // Принудительно создаем визуализацию
+                  if (!bedVisualizer) {
+                    const bedContainer = document.getElementById('bedVisualization');
+                    bedVisualizer = new BedVisualizer();
+                    bedVisualizer.init(bedContainer);
+                  }
+                  calculatePACount();
+                }, 50);
               }, 100);
             }
           }, 200);
@@ -729,7 +1135,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (pa.startPA !== undefined) document.getElementById('startPA').value = pa.startPA;
             if (pa.endPA !== undefined) document.getElementById('endPA').value = pa.endPA;
             if (pa.stepPA !== undefined) document.getElementById('stepPA').value = pa.stepPA;
-            calculatePACount();
+            // Обновляем визуализацию после загрузки PA параметров
+            setTimeout(() => {
+              console.log('PA parameters loaded, forcing visualization update');
+              if (!bedVisualizer) {
+                const bedContainer = document.getElementById('bedVisualization');
+                bedVisualizer = new BedVisualizer();
+                bedVisualizer.init(bedContainer);
+              }
+              calculatePACount();
+            }, 100);
           }
         }
       }
