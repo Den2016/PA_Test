@@ -1,0 +1,7 @@
+ini_examples/
+node_modules/
+dist/
+*.log
+settings.json
+.idea/
+.amazonq/

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>PA Test Generator</title>
+    <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div class="flex">
+    <div class="container w50">
+        <h1>PA Test Generator</h1>
+
+        <div class="form-group">
+            <label for="selSlicer">Выберите слайсер</label>
+            <select id="selSlicer">
+                <option value="orca">Orca slicer</option>
+                <option value="qidi">Qidi slicer</option>
+                <option value="prusa">Prusa slicer</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="selPrinter">Выберите принтер</label>
+            <select id="selPrinter" disabled>
+                <option>Выберите сначала слайсер</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="selFilament">Выберите материал</label>
+            <select id="selFilament" disabled>
+                <option>Выберите сначала принтер</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="selPrint">Выберите настройки печати</label>
+            <select id="selPrint" disabled>
+                <option>Выберите сначала принтер</option>
+            </select>
+        </div>
+    </div>
+    <div id="pa_params" class="container w50">
+        <h1>Параметры PA теста</h1>
+        
+        <div class="form-group">
+            <label for="smoothTime">Smooth time</label>
+            <input type="number" id="smoothTime" step="0.01" value="0.04" min="0">
+        </div>
+        
+        <div class="form-group">
+            <label for="startPA">Стартовый PA</label>
+            <input type="number" id="startPA" step="0.001" value="0.000" min="0">
+        </div>
+        
+        <div class="form-group">
+            <label for="endPA">Конечный PA</label>
+            <input type="number" id="endPA" step="0.001" value="0.100" min="0">
+        </div>
+        
+        <div class="form-group">
+            <label for="stepPA">Шаг</label>
+            <input type="number" id="stepPA" step="0.001" value="0.010" min="0.001">
+        </div>
+        
+        <div class="form-group">
+            <label>Количество значений</label>
+            <div id="countDisplay" class="count-display">11</div>
+        </div>
+        
+        <div class="form-group">
+            <label>Список значений PA</label>
+            <div id="paValues" class="pa-values"></div>
+        </div>
+        
+        <div class="form-group">
+            <button id="generateBtn" class="generate-btn" disabled>Сгенерировать G-code</button>
+        </div>
+    </div>
+</div>
+
+<div class="container full-width">
+    <h2>G-code</h2>
+    <textarea id="gcodeOutput" class="gcode-output" placeholder="Здесь будет сгенерированный G-code..."></textarea>
+    <button id="saveBtn" class="save-btn" disabled>Сохранить в файл</button>
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>
