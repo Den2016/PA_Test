@@ -27,8 +27,6 @@ class BedVisualizer {
       const width = container.clientWidth;
       const height = container.clientHeight;
 
-      // Пробуем Babylon.js сразу
-
       // Проверяем поддержку WebGL
       if (!this.isWebGLSupported()) {
         console.log('WebGL недоступен, используем 2D Canvas');
@@ -273,29 +271,6 @@ class BedVisualizer {
     }
   }
 
-  animate() {
-    if (this.is2D) return; // Не анимируем в 2D режиме
-    
-    this.animationId = requestAnimationFrame(() => this.animate());
-    
-    try {
-      this.controls.update();
-      this.renderer.render(this.scene, this.camera);
-    } catch (e) {
-      console.warn('WebGL ошибка рендеринга:', e.message);
-      // Переход на 2D при ошибке рендеринга
-      this.switchTo2D(document.getElementById('bedVisualization'));
-    }
-  }
-
-  onWindowResize(container) {
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height);
-  }
-
   destroy() {
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
@@ -324,7 +299,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (printerName) {
       selectedPrinter = parsePrinterName(printerName);
       initializePrinterSelection();
-      // Загружаем сохраненные настройки для этого принтера
       loadPrinterSettings(printerName);
     } else {
       selFilament.disabled = true;
@@ -541,15 +515,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function initializePrinterSelection() {
-    // 1. Загружаем настройки печати для принтера
     const printSettings = getCompatiblePrintSettings();
     updatePrintSelect(printSettings, printSettings[0] || '');
     
-    // 2. Загружаем филаменты для принтера
     const filaments = getCompatibleFilaments();
     updateFilamentSelect(filaments, filaments[0] || '');
     
-    // 3. Повторно проверяем настройки печати с учетом выбранного филамента
     const newPrintSettings = getCompatiblePrintSettings();
     const currentPrint = selPrint.value;
     const finalPrint = newPrintSettings.includes(currentPrint) ? currentPrint : (newPrintSettings[0] || '');
@@ -702,7 +673,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function calculatePACount() {
-    console.log('calculatePACount called');
     const startPA = parseFloat(document.getElementById('startPA').value) || 0;
     const endPA = parseFloat(document.getElementById('endPA').value) || 0;
     const stepPA = parseFloat(document.getElementById('stepPA').value) || 0.001;
@@ -731,29 +701,18 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('countDisplay').textContent = displayText;
     document.getElementById('paValues').textContent = values.join(', ');
     
-    // Обновляем 3D визуализацию
     updateBedVisualization(values);
   }
   
   function updateBedVisualization(paValues) {
-    console.log('updateBedVisualization called:', {
-      selectedPrinter: !!selectedPrinter,
-      selPrintValue: selPrint.value,
-      paValuesLength: paValues ? paValues.length : 0,
-      bedVisualizerExists: !!bedVisualizer
-    });
+    if (!selectedPrinter || !selPrint.value) return;
     
-    if (!selectedPrinter || !selPrint.value) {
-      console.log('updateBedVisualization: missing printer or print settings');
-      return;
-    }
-    
-    // Если визуализатор еще не создан, создаем его
     if (!bedVisualizer) {
-      console.log('Creating bedVisualizer...');
       const bedContainer = document.getElementById('bedVisualization');
-      bedVisualizer = new BedVisualizer();
-      bedVisualizer.init(bedContainer);
+      if (bedContainer) {
+        bedVisualizer = new BedVisualizer();
+        bedVisualizer.init(bedContainer);
+      }
     }
     
     try {
@@ -788,11 +747,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       const spacing = 5;
-      
-      // Рассчитываем оптимальное расположение
       const layout = calculateOptimalLayout(paValues.length, objectWidth, objectHeight, spacing, bedWidth, bedHeight);
       
-      // Обновляем визуализацию
       bedVisualizer.createBed(bedWidth, bedHeight);
       bedVisualizer.updateObjects(bedWidth, bedHeight, paValues, layout, objectWidth, objectHeight);
     } catch (e) {
@@ -834,32 +790,29 @@ document.addEventListener('DOMContentLoaded', () => {
     return bestLayout;
   }
 
-  // Добавляем обработчики для PA параметров
   document.getElementById('startPA').addEventListener('input', calculatePACount);
   document.getElementById('endPA').addEventListener('input', calculatePACount);
   document.getElementById('stepPA').addEventListener('input', calculatePACount);
   
-  // Начальный расчет
   calculatePACount();
   
-  // Обработчик кнопки генерации
   document.getElementById('generateBtn').addEventListener('click', generateGCode);
-  
-  // Обработчик кнопки сохранения
   document.getElementById('saveBtn').addEventListener('click', saveGCode);
+  const sendBtn = document.getElementById('sendBtn');
+  sendBtn.addEventListener('click', () => {
+    sendBtn.disabled = true;
+    sendToPrinter().finally(() => {
+      sendBtn.disabled = false;
+    });
+  });
   
-  // Обработчик кнопки отправки на принтер
-  document.getElementById('sendBtn').addEventListener('click', sendToPrinter);
+  // Загружаем настройки после небольшой задержки
+  setTimeout(() => {
+    loadSettings();
+  }, 500);
   
-  // Загружаем сохраненные настройки при запуске
-  loadSettings();
-  
-  // Визуализатор создается лениво при первом обращении
-  
-  // Сохраняем настройки при закрытии окна
   window.addEventListener('beforeunload', saveSettings);
   
-  // Проверяем готовность к генерации
   function checkGenerateReady() {
     const ready = selectedPrinter && selFilament.value && selPrint.value;
     document.getElementById('generateBtn').disabled = !ready;
@@ -871,35 +824,27 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('sendBtn').disabled = !hasGcode || !isPhysicalPrinter;
   }
   
-  /**
-   * Рассчитывает примерное время печати PA теста
-   * @returns {number} Время в минутах
-   */
   function calculatePrintTime() {
     try {
       const startPA = parseFloat(document.getElementById('startPA').value) || 0;
       const endPA = parseFloat(document.getElementById('endPA').value) || 0;
       const stepPA = parseFloat(document.getElementById('stepPA').value) || 0.001;
       
-      // Количество объектов
       const objectCount = Math.floor((endPA - startPA) / stepPA) + 1;
       
-      // Параметры печати
-      const layerHeight = 0.2; // мм
+      const layerHeight = 0.2;
       const layerCount = 25;
-      const objectArea = 25 * 18; // мм²
+      const objectArea = 25 * 18;
       
-      // Примерные скорости (мм/мин)
-      const perimeterSpeed = 1800; // 30 мм/с
-      const infillSpeed = 3000;    // 50 мм/с
-      const travelSpeed = 9000;    // 150 мм/с
+      const perimeterSpeed = 1800;
+      const infillSpeed = 3000;
+      const travelSpeed = 9000;
       
       let totalTime = 0;
       
       for (let layer = 0; layer < layerCount; layer++) {
         let layerTime = 0;
         
-        // Определяем параметры слоя
         let perimeterCount, hasInfill;
         if (layer === 0) {
           perimeterCount = 1;
@@ -913,26 +858,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         for (let obj = 0; obj < objectCount; obj++) {
-          // Время на периметры
-          const perimeterLength = perimeterCount * (2 * (25 + 18)); // примерный периметр
+          const perimeterLength = perimeterCount * (2 * (25 + 18));
           layerTime += perimeterLength / perimeterSpeed;
           
-          // Время на заполнение
           if (hasInfill) {
-            const infillLength = objectArea * 0.3; // примерная длина заполнения
+            const infillLength = objectArea * 0.3;
             layerTime += infillLength / infillSpeed;
           }
           
-          // Время на перемещения
-          layerTime += 30 / travelSpeed; // примерно 30мм перемещений на объект
+          layerTime += 30 / travelSpeed;
         }
         
         totalTime += layerTime;
       }
       
-      return Math.round(totalTime); // в минутах
+      return Math.round(totalTime);
     } catch (e) {
-      return 60; // по умолчанию 1 час
+      return 60;
     }
   }
   
@@ -948,10 +890,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       let template = printConfig.output_filename_format || '{input_filename_base}';
       
-      // Объединяем все конфиги
       const allConfigs = {...printerConfig, ...filamentConfig, ...printConfig};
       
-      // Специальные переменные
       template = template.replace(/\{input_filename_base\}/g, 'PA_Test');
       
       const printTimeMinutes = calculatePrintTime();
@@ -967,20 +907,17 @@ document.addEventListener('DOMContentLoaded', () => {
       template = template.replace(/\{hour\}/g, String(now.getHours()).padStart(2, '0'));
       template = template.replace(/\{minute\}/g, String(now.getMinutes()).padStart(2, '0'));
       
-      // Функция digits
       template = template.replace(/\{digits\(([^,]+),\s*(\d+),\s*(\d+)\)\}/g, (match, varName, minDigits, precision) => {
         const value = parseFloat(allConfigs[varName] || 0);
         return value.toFixed(parseInt(precision)).padStart(parseInt(minDigits), '0');
       });
       
-      // Массивы с индексами
       template = template.replace(/\{([^}]+)\[(\d+)\]\}/g, (match, varName, index) => {
         const value = allConfigs[varName] || '';
         const array = value.split(';');
         return array[parseInt(index)] || value;
       });
       
-      // Обычные переменные из конфигов
       for (const [key, value] of Object.entries(allConfigs)) {
         const regex = new RegExp(`\\{${key}\\}`, 'g');
         template = template.replace(regex, value);
@@ -992,6 +929,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
+  function showSendProgress(message, progress = 0) {
+    let progressDiv = document.getElementById('sendProgress');
+    if (!progressDiv) {
+      progressDiv = document.createElement('div');
+      progressDiv.id = 'sendProgress';
+      progressDiv.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        border: 2px solid #007acc;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 1000;
+        min-width: 300px;
+        text-align: center;
+      `;
+      document.body.appendChild(progressDiv);
+    }
+    
+    progressDiv.innerHTML = `
+      <div style="margin-bottom: 15px; font-weight: bold;">${message}</div>
+      <div style="background: #f0f0f0; border-radius: 10px; height: 20px; overflow: hidden;">
+        <div style="background: #007acc; height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
+      </div>
+      <div style="margin-top: 10px; font-size: 12px; color: #666;">${progress}%</div>
+    `;
+  }
+  
+  function hideSendProgress() {
+    const progressDiv = document.getElementById('sendProgress');
+    if (progressDiv) {
+      progressDiv.remove();
+    }
+  }
+
   async function sendToPrinter() {
     const gcode = document.getElementById('gcodeOutput').value;
     if (!gcode.trim()) {
@@ -999,35 +974,37 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     
-    // Получаем IP принтера из физического принтера
     if (!selectedPrinter || selectedPrinter.type !== 'physical') {
       alert('Выберите физический принтер для отправки');
       return;
     }
     
     try {
+      showSendProgress('Подготовка к отправке...', 10);
+      
       const physicalConfigPath = path.join(currentSlicerPath, 'physical_printer', selectedPrinter.physicalName + '.ini');
       const physicalConfig = parseIniFile(physicalConfigPath);
       const printerHost = physicalConfig.print_host;
       
-      console.log('Physical printer config:', physicalConfig);
-      console.log('Printer host:', printerHost);
-      
-      // Обрабатываем адрес с портом (например, 192.168.1.100:80)
       let hostUrl = printerHost;
       if (printerHost && !printerHost.startsWith('http')) {
         hostUrl = `http://${printerHost}`;
       }
       
       if (!printerHost || printerHost.trim() === '' || printerHost.includes('0.0.0.1')) {
+        hideSendProgress();
         alert(`IP адрес принтера некорректный: "${printerHost}".\n\nПроверьте параметр print_host в настройках физического принтера.`);
         return;
       }
+      
+      showSendProgress('Создание файла...', 30);
       
       const filename = generateFilename();
       const formData = new FormData();
       const blob = new Blob([gcode], { type: 'text/plain' });
       formData.append('file', blob, filename);
+      
+      showSendProgress('Загрузка файла на принтер...', 50);
       
       const uploadResponse = await fetch(`${hostUrl}/server/files/upload`, {
         method: 'POST',
@@ -1035,6 +1012,8 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       
       if (uploadResponse.ok) {
+        showSendProgress('Запуск печати...', 80);
+        
         const startResponse = await fetch(`${hostUrl}/printer/print/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1042,14 +1021,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         
         if (startResponse.ok) {
-          alert(`Файл отправлен и печать запущена на ${printerHost}`);
+          showSendProgress('Печать запущена!', 100);
+          setTimeout(() => {
+            hideSendProgress();
+            alert(`Файл отправлен и печать запущена на ${printerHost}`);
+          }, 1000);
         } else {
+          hideSendProgress();
           alert(`Файл загружен, но не удалось запустить печать`);
         }
       } else {
         throw new Error('Ошибка загрузки файла');
       }
     } catch (error) {
+      hideSendProgress();
       alert(`Ошибка отправки: ${error.message}`);
     }
   }
@@ -1065,7 +1050,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const filename = generateFilename();
       
       try {
-        // Пробуем использовать IPC для диалога
         const { ipcRenderer } = require('electron');
         
         const result = await ipcRenderer.invoke('save-file-dialog', {
@@ -1083,10 +1067,8 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (ipcError) {
         console.warn('IPC не работает, используем fallback:', ipcError.message);
         
-        // Fallback: сохраняем в папку ini_examples
         const outputPath = path.join(__dirname, 'ini_examples', filename);
         
-        // Создаем папку если не существует
         const outputDir = path.dirname(outputPath);
         if (!fs.existsSync(outputDir)) {
           fs.mkdirSync(outputDir, { recursive: true });
@@ -1108,7 +1090,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     try {
-      // Получаем значения PA
       const startPA = parseFloat(document.getElementById('startPA').value) || 0;
       const endPA = parseFloat(document.getElementById('endPA').value) || 0;
       const stepPA = parseFloat(document.getElementById('stepPA').value) || 0.001;
@@ -1133,7 +1114,6 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('saveBtn').disabled = false;
       updateSendButton();
       
-      // Сохраняем настройки после успешной генерации
       saveSettings();
     } catch (error) {
       alert(`Ошибка генерации G-code:\n${error.message}`);
@@ -1142,21 +1122,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  /**
-   * Загружает общие настройки приложения
-   */
   function loadSettings() {
     try {
       if (fs.existsSync(settingsPath)) {
         const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
         
-        // Восстанавливаем последний выбранный слайсер
         if (settings.lastSlicer) {
           selSlicer.value = settings.lastSlicer;
           currentSlicer = settings.lastSlicer;
           loadPrinters(currentSlicer);
           
-          // Восстанавливаем последний принтер после загрузки списка
           setTimeout(() => {
             if (settings.lastPrinter && selPrinter.querySelector(`option[value="${settings.lastPrinter}"]`)) {
               selPrinter.value = settings.lastPrinter;
@@ -1172,10 +1147,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  /**
-   * Загружает настройки для конкретного принтера
-   * @param {string} printerName - Имя принтера
-   */
   function loadPrinterSettings(printerName) {
     try {
       if (fs.existsSync(settingsPath)) {
@@ -1183,46 +1154,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const printerSettings = settings.printers?.[printerName];
         
         if (printerSettings) {
-          // Восстанавливаем филамент
           setTimeout(() => {
             if (printerSettings.filament && selFilament.querySelector(`option[value="${printerSettings.filament}"]`)) {
               selFilament.value = printerSettings.filament;
               updatePrintSettings();
               
-              // Восстанавливаем настройки печати
               setTimeout(() => {
                 if (printerSettings.print && selPrint.querySelector(`option[value="${printerSettings.print}"]`)) {
                   selPrint.value = printerSettings.print;
                 }
-                // Обновляем визуализацию после загрузки всех настроек
                 setTimeout(() => {
-                  console.log('Final settings loaded, forcing visualization update');
-                  // Принудительно создаем визуализацию
-                  if (!bedVisualizer) {
-                    const bedContainer = document.getElementById('bedVisualization');
-                    bedVisualizer = new BedVisualizer();
-                    bedVisualizer.init(bedContainer);
-                  }
                   calculatePACount();
                 }, 50);
               }, 100);
             }
           }, 200);
           
-          // Восстанавливаем PA параметры
           if (printerSettings.paSettings) {
             const pa = printerSettings.paSettings;
             if (pa.startPA !== undefined) document.getElementById('startPA').value = pa.startPA;
             if (pa.endPA !== undefined) document.getElementById('endPA').value = pa.endPA;
             if (pa.stepPA !== undefined) document.getElementById('stepPA').value = pa.stepPA;
-            // Обновляем визуализацию после загрузки PA параметров
             setTimeout(() => {
-              console.log('PA parameters loaded, forcing visualization update');
-              if (!bedVisualizer) {
-                const bedContainer = document.getElementById('bedVisualization');
-                bedVisualizer = new BedVisualizer();
-                bedVisualizer.init(bedContainer);
-              }
               calculatePACount();
             }, 100);
           }
@@ -1233,23 +1186,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
-  /**
-   * Сохраняет текущие настройки
-   */
   function saveSettings() {
     try {
       let settings = {};
       
-      // Загружаем существующие настройки
       if (fs.existsSync(settingsPath)) {
         settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       }
       
-      // Обновляем общие настройки
       settings.lastSlicer = currentSlicer;
       settings.lastPrinter = selPrinter.value;
       
-      // Обновляем настройки принтера
       if (selectedPrinter && selPrinter.value) {
         if (!settings.printers) settings.printers = {};
         
