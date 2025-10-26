@@ -213,7 +213,11 @@ class GCodeGenerator {
     if (!bedShape) return null;
     
     try {
-      const points = bedShape.split(',').map(point => {
+      // Если bedShape - массив, берем первый элемент
+      const shapeString = Array.isArray(bedShape) ? bedShape[0] : bedShape;
+      if (!shapeString || typeof shapeString !== 'string') return null;
+      
+      const points = shapeString.split(',').map(point => {
         const [x, y] = point.split('x').map(Number);
         return { x, y };
       });
@@ -1024,6 +1028,57 @@ class GCodeGenerator {
     
     return infillGcode;
   }
+  /**
+   * Рассчитывает оптимальное расположение объектов на столе
+   */
+  calculateOptimalLayout(objectCount, objectWidth, objectHeight, spacing, bedWidth, bedHeight) {
+    const margin = 10;
+    const availableWidth = bedWidth - 2 * margin;
+    const availableHeight = bedHeight - 2 * margin;
+    
+    let bestLayout = null;
+    let minAspectRatio = Infinity;
+    
+    for (let cols = 1; cols <= objectCount; cols++) {
+      const rows = Math.ceil(objectCount / cols);
+      
+      const totalWidth = cols * objectWidth + (cols - 1) * spacing;
+      const totalHeight = rows * objectHeight + (rows - 1) * spacing;
+      
+      if (totalWidth <= availableWidth && totalHeight <= availableHeight) {
+        const aspectRatio = Math.max(totalWidth / totalHeight, totalHeight / totalWidth);
+        
+        if (aspectRatio < minAspectRatio) {
+          minAspectRatio = aspectRatio;
+          bestLayout = {
+            cols,
+            rows,
+            totalWidth,
+            totalHeight,
+            startX: margin + (availableWidth - totalWidth) / 2,
+            startY: margin + (availableHeight - totalHeight) / 2
+          };
+        }
+      }
+    }
+    
+    return bestLayout;
+  }
+  
+  /**
+   * Рассчитывает максимальное количество объектов на столе
+   */
+  calculateMaxObjects(objectWidth, objectHeight, spacing, bedWidth, bedHeight) {
+    const margin = 10;
+    const availableWidth = bedWidth - 2 * margin;
+    const availableHeight = bedHeight - 2 * margin;
+    
+    const maxCols = Math.floor((availableWidth + spacing) / (objectWidth + spacing));
+    const maxRows = Math.floor((availableHeight + spacing) / (objectHeight + spacing));
+    
+    return maxCols * maxRows;
+  }
+
   generatePAObjects(slicerPath, printerName, filamentName, printName, paValues) {
     const printerConfig = this.parseIniFile(path.join(slicerPath, 'printer', printerName + '.ini'));
     const filamentConfig = this.parseIniFile(path.join(slicerPath, 'filament', filamentName + '.ini'));
@@ -1045,23 +1100,45 @@ class GCodeGenerator {
       }
     }
 
-    const objectWidth = 25;
-    const objectHeight = 18;
-    const spacing = 2;
-    const startX = 5;
-    const startY = 5;
+    const nozzleDiameter = parseFloat(this.variables.nozzle_diameter[0]);
+    
+    // Определяем размеры объекта в зависимости от диаметра сопла
+    let objectWidth, objectHeight;
+    if (nozzleDiameter <= 0.4) {
+      objectWidth = 30;
+      objectHeight = 20;
+    } else if (nozzleDiameter <= 0.6) {
+      objectWidth = 35;
+      objectHeight = 25;
+    } else {
+      objectWidth = 40;
+      objectHeight = 30;
+    }
+    const spacing = 5;
     
     const bedWidth = parseFloat(this.variables.print_bed_size[0]);
-    const objectsPerRow = Math.floor((bedWidth - startX) / (objectWidth + spacing));
+    const bedHeight = parseFloat(this.variables.print_bed_size[1]);
+    
+    // Проверяем максимальное количество объектов
+    const maxObjects = this.calculateMaxObjects(objectWidth, objectHeight, spacing, bedWidth, bedHeight);
+    if (paValues.length > maxObjects) {
+      throw new Error(`Слишком много объектов! Максимум ${maxObjects} объектов для сопла ${nozzleDiameter}мм на столе ${bedWidth}×${bedHeight}мм`);
+    }
+    
+    // Рассчитываем оптимальное расположение
+    const layout = this.calculateOptimalLayout(paValues.length, objectWidth, objectHeight, spacing, bedWidth, bedHeight);
+    if (!layout) {
+      throw new Error(`Невозможно разместить ${paValues.length} объектов на столе`);
+    }
     
     // Рассчитываем границы первого слоя для всех объектов
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     
     for (let objIndex = 0; objIndex < paValues.length; objIndex++) {
-      const row = Math.floor(objIndex / objectsPerRow);
-      const col = objIndex % objectsPerRow;
-      const objX = startX + col * (objectWidth + spacing);
-      const objY = startY + row * (objectHeight + spacing);
+      const row = Math.floor(objIndex / layout.cols);
+      const col = objIndex % layout.cols;
+      const objX = layout.startX + col * (objectWidth + spacing);
+      const objY = layout.startY + row * (objectHeight + spacing);
       
       minX = Math.min(minX, objX);
       minY = Math.min(minY, objY);
@@ -1074,10 +1151,8 @@ class GCodeGenerator {
     this.variables.first_layer_print_min = [minX, minY];
     this.variables.first_layer_print_max = [maxX, maxY];
     this.variables.first_layer_print_size = [maxX - minX, maxY - minY];
-    
     const layerHeight = parseFloat(this.variables.layer_height[0]);
     const firstLayerHeight = parseFloat(this.variables.first_layer_height[0]);
-    const nozzleDiameter = parseFloat(this.variables.nozzle_diameter[0]);
     const filamentDiameter = parseFloat(this.variables.filament_diameter[0]);
     const extrusionMultiplier = parseFloat(this.variables.extrusion_multiplier?.[0] || 1);
     
@@ -1126,14 +1201,14 @@ class GCodeGenerator {
       }
       
       // Оптимизируем порядок печати объектов для минимизации холостых ходов
-      const optimizedOrder = this.getOptimizedPrintOrder(paValues.length, objectsPerRow, layer);
+      const optimizedOrder = this.getOptimizedPrintOrder(paValues.length, layout.cols, layer);
       
       for (const objIndex of optimizedOrder) {
         const paValue = paValues[objIndex];
-        const row = Math.floor(objIndex / objectsPerRow);
-        const col = objIndex % objectsPerRow;
-        const objX = startX + col * (objectWidth + spacing);
-        const objY = startY + row * (objectHeight + spacing);
+        const row = Math.floor(objIndex / layout.cols);
+        const col = objIndex % layout.cols;
+        const objX = layout.startX + col * (objectWidth + spacing);
+        const objY = layout.startY + row * (objectHeight + spacing);
         
         gcode.push(`; Object ${objIndex + 1}, PA: ${paValue}`);
         gcode.push(`M900 K${paValue}`);

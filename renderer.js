@@ -352,6 +352,57 @@ document.addEventListener('DOMContentLoaded', () => {
     updateFilamentSelect(filaments, finalFilament);
   }
 
+  function calculateMaxObjects() {
+    if (!selectedPrinter || !selPrint.value) return null;
+    
+    try {
+      const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
+      const printConfigPath = path.join(currentSlicerPath, 'print', selPrint.value + '.ini');
+      
+      const printerConfig = parseIniFile(printerConfigPath);
+      const printConfig = parseIniFile(printConfigPath);
+      
+      const bedShape = printerConfig.bed_shape;
+      if (!bedShape) return null;
+      
+      const points = bedShape.split(',').map(point => {
+        const [x, y] = point.split('x').map(Number);
+        return { x, y };
+      });
+      
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const bedWidth = Math.max(...xs) - Math.min(...xs);
+      const bedHeight = Math.max(...ys) - Math.min(...ys);
+      
+      const nozzleDiameter = parseFloat(printerConfig.nozzle_diameter?.split(';')[0] || '0.4');
+      
+      let objectWidth, objectHeight;
+      if (nozzleDiameter <= 0.4) {
+        objectWidth = 30;
+        objectHeight = 20;
+      } else if (nozzleDiameter <= 0.6) {
+        objectWidth = 35;
+        objectHeight = 25;
+      } else {
+        objectWidth = 40;
+        objectHeight = 30;
+      }
+      
+      const spacing = 5;
+      const margin = 10;
+      const availableWidth = bedWidth - 2 * margin;
+      const availableHeight = bedHeight - 2 * margin;
+      
+      const maxCols = Math.floor((availableWidth + spacing) / (objectWidth + spacing));
+      const maxRows = Math.floor((availableHeight + spacing) / (objectHeight + spacing));
+      
+      return maxCols * maxRows;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function calculatePACount() {
     const startPA = parseFloat(document.getElementById('startPA').value) || 0;
     const endPA = parseFloat(document.getElementById('endPA').value) || 0;
@@ -368,7 +419,17 @@ document.addEventListener('DOMContentLoaded', () => {
       values.push(value.toFixed(3));
     }
     
-    document.getElementById('countDisplay').textContent = values.length;
+    const maxObjects = calculateMaxObjects();
+    let displayText = values.length.toString();
+    
+    if (maxObjects && values.length > maxObjects) {
+      displayText += ` (Макс: ${maxObjects})`;
+      document.getElementById('countDisplay').style.color = 'red';
+    } else {
+      document.getElementById('countDisplay').style.color = '';
+    }
+    
+    document.getElementById('countDisplay').textContent = displayText;
     document.getElementById('paValues').textContent = values.join(', ');
   }
 
@@ -665,7 +726,6 @@ document.addEventListener('DOMContentLoaded', () => {
           // Восстанавливаем PA параметры
           if (printerSettings.paSettings) {
             const pa = printerSettings.paSettings;
-            if (pa.smoothTime !== undefined) document.getElementById('smoothTime').value = pa.smoothTime;
             if (pa.startPA !== undefined) document.getElementById('startPA').value = pa.startPA;
             if (pa.endPA !== undefined) document.getElementById('endPA').value = pa.endPA;
             if (pa.stepPA !== undefined) document.getElementById('stepPA').value = pa.stepPA;
@@ -702,7 +762,6 @@ document.addEventListener('DOMContentLoaded', () => {
           filament: selFilament.value,
           print: selPrint.value,
           paSettings: {
-            smoothTime: parseFloat(document.getElementById('smoothTime').value) || 0.04,
             startPA: parseFloat(document.getElementById('startPA').value) || 0,
             endPA: parseFloat(document.getElementById('endPA').value) || 0.1,
             stepPA: parseFloat(document.getElementById('stepPA').value) || 0.01
