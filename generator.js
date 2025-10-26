@@ -441,6 +441,147 @@ class GCodeGenerator {
     return parseFloat(speedValue);
   }
 
+  parseInfillOverlap(overlapValue, extrusionWidth) {
+    if (typeof overlapValue === 'string' && overlapValue.endsWith('%')) {
+      return extrusionWidth * parseFloat(overlapValue) / 100;
+    }
+    return parseFloat(overlapValue);
+  }
+
+  generateDiagonalZigzag(infillX1, infillY1, infillX2, infillY2, extrusionWidth, rotateLeft = true, minLineLengthFactor = 2.0) {
+    const width = infillX2 - infillX1;
+    const height = infillY2 - infillY1;
+    const centerX = (infillX1 + infillX2) / 2;
+    const centerY = (infillY1 + infillY2) / 2;
+    
+    const lines = [];
+    const maxDimension = Math.max(width, height) * 1.5;
+    const lineCount = Math.ceil(maxDimension / extrusionWidth) + 2;
+    
+    for (let i = 0; i < lineCount; i++) {
+      const x = -maxDimension / 2 + i * extrusionWidth;
+      lines.push([
+        {x: x, y: -maxDimension / 2},
+        {x: x, y: maxDimension / 2}
+      ]);
+    }
+    
+    const angle = rotateLeft ? Math.PI / 4 : -Math.PI / 4;
+    const cos45 = Math.cos(angle);
+    const sin45 = Math.sin(angle);
+    
+    const rotatedLines = lines.map(line => {
+      return line.map(point => ({
+        x: point.x * cos45 - point.y * sin45 + centerX,
+        y: point.x * sin45 + point.y * cos45 + centerY
+      }));
+    });
+    
+    const points = [];
+    let isFirstLine = true;
+    const minLineLength = extrusionWidth * minLineLengthFactor;
+    
+    for (let i = 0; i < rotatedLines.length; i++) {
+      const line = rotatedLines[i];
+      const clippedLine = this.clipLineToRect(line[0], line[1], infillX1, infillY1, infillX2, infillY2);
+      
+      if (clippedLine) {
+        const lineLength = Math.sqrt(
+          Math.pow(clippedLine.end.x - clippedLine.start.x, 2) + 
+          Math.pow(clippedLine.end.y - clippedLine.start.y, 2)
+        );
+        
+        if (lineLength < minLineLength) continue;
+        
+        if (isFirstLine) {
+          points.push(clippedLine.start);
+          points.push(clippedLine.end);
+          isFirstLine = false;
+        } else {
+          if (i % 2 === 1) {
+            points.push(clippedLine.start);
+            points.push(clippedLine.end);
+          } else {
+            points.push(clippedLine.end);
+            points.push(clippedLine.start);
+          }
+        }
+      }
+    }
+    
+    return points;
+  }
+
+  clipLineToRect(p1, p2, x1, y1, x2, y2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    let t0 = 0, t1 = 1;
+    
+    const clipTest = (p, q) => {
+      if (p === 0) return q >= 0;
+      const t = q / p;
+      if (p < 0) {
+        if (t > t1) return false;
+        if (t > t0) t0 = t;
+      } else {
+        if (t < t0) return false;
+        if (t < t1) t1 = t;
+      }
+      return true;
+    };
+    
+    if (clipTest(-dx, p1.x - x1) && clipTest(dx, x2 - p1.x) && clipTest(-dy, p1.y - y1) && clipTest(dy, y2 - p1.y)) {
+      return {
+        start: { x: p1.x + t0 * dx, y: p1.y + t0 * dy },
+        end: { x: p1.x + t1 * dx, y: p1.y + t1 * dy }
+      };
+    }
+    return null;
+  }
+
+  generateNewInfill(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, configs, isFirstLayer = false, rotateLeft = true) {
+    const perimeterOffset = perimeterCount * extrusionWidth - overlapDistance;
+    const infillX1 = objX + perimeterOffset + extrusionWidth / 2;
+    const infillY1 = objY + perimeterOffset + extrusionWidth / 2;
+    const infillX2 = objX + objectWidth - perimeterOffset - extrusionWidth / 2;
+    const infillY2 = objY + objectHeight - perimeterOffset - extrusionWidth / 2;
+    
+    if (infillX2 <= infillX1 || infillY2 <= infillY1) return [];
+    
+    const minLineLengthFactor = 2;
+    const points = this.generateDiagonalZigzag(infillX1, infillY1, infillX2, infillY2, extrusionWidth, rotateLeft, minLineLengthFactor);
+    
+    if (points.length === 0) return [];
+    
+    let infillGcode = [];
+    infillGcode.push(';TYPE:Solid infill');
+    infillGcode.push(`;WIDTH:${extrusionWidth.toFixed(3)}`);
+    
+    const speeds = this.calculateSpeeds(configs, isFirstLayer, extruder, extrusionWidth, currentLayerHeight);
+    const travelSpeed = parseFloat(configs.travel_speed[0]) * 60;
+    
+    this.addTravelMove(infillGcode, points[0].x, points[0].y, configs);
+    
+    for (let i = 1; i < points.length; i++) {
+      const prevPoint = points[i - 1];
+      const currentPoint = points[i];
+      
+      const distance = Math.sqrt(
+        Math.pow(currentPoint.x - prevPoint.x, 2) + 
+        Math.pow(currentPoint.y - prevPoint.y, 2)
+      );
+      
+      const extrusionAmount = extruder.calculateExtrusion(distance, extrusionWidth, currentLayerHeight);
+      extruder.currentE += extrusionAmount;
+      
+      infillGcode.push(`G1 X${currentPoint.x.toFixed(3)} Y${currentPoint.y.toFixed(3)} E${extrusionAmount.toFixed(5)} F${speeds.infill}`);
+      this.currentX = currentPoint.x;
+      this.currentY = currentPoint.y;
+    }
+    
+    return infillGcode;
+  }
+
   calculateSpeeds(configs, isFirstLayer, extruder = null, extrusionWidth = 0.4, layerHeight = 0.2) {
     const getConfigValue = (key, defaultValue) => {
       const value = configs[key];
@@ -553,14 +694,13 @@ class GCodeGenerator {
     return perimeterGcode;
   }
 
-  generateInfillOdd(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, infillOverlap, extruder, configs, isFirstLayer = false) {
+  generateInfillOdd(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, configs, isFirstLayer = false) {
     // Расчет границ области заполнения
-    const overlapDistance = extrusionWidth * infillOverlap;
     const perimeterOffset = perimeterCount * extrusionWidth - overlapDistance;
-    const infillX1 = objX + perimeterOffset; // Левая граница
-    const infillY1 = objY + perimeterOffset; // Нижняя граница
-    const infillX2 = objX + objectWidth - perimeterOffset; // Правая граница
-    const infillY2 = objY + objectHeight - perimeterOffset; // Верхняя граница
+    const infillX1 = objX + perimeterOffset + extrusionWidth/2; // Левая граница
+    const infillY1 = objY + perimeterOffset + extrusionWidth/2; // Нижняя граница
+    const infillX2 = objX + objectWidth - perimeterOffset - extrusionWidth/2; // Правая граница
+    const infillY2 = objY + objectHeight - perimeterOffset - extrusionWidth/2; // Верхняя граница
     
     let infillGcode = [];
     infillGcode.push(';TYPE:Solid infill');
@@ -818,14 +958,13 @@ class GCodeGenerator {
     return order;
   }
 
-  generateInfillEven(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, infillOverlap, extruder, configs, isFirstLayer = false) {
+  generateInfillEven(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, configs, isFirstLayer = false) {
     // Расчет границ области заполнения
-    const overlapDistance = extrusionWidth * infillOverlap;
     const perimeterOffset = perimeterCount * extrusionWidth - overlapDistance;
-    const infillX1 = objX + perimeterOffset; // Левая граница
-    const infillY1 = objY + perimeterOffset; // Нижняя граница
-    const infillX2 = objX + objectWidth - perimeterOffset; // Правая граница
-    const infillY2 = objY + objectHeight - perimeterOffset; // Верхняя граница
+    const infillX1 = objX + perimeterOffset + extrusionWidth/2; // Левая граница
+    const infillY1 = objY + perimeterOffset + extrusionWidth/2; // Нижняя граница
+    const infillX2 = objX + objectWidth - perimeterOffset - extrusionWidth/2; // Правая граница
+    const infillY2 = objY + objectHeight - perimeterOffset - extrusionWidth/2; // Верхняя граница
     
     let infillGcode = [];
     infillGcode.push(';TYPE:Solid infill');
@@ -1157,7 +1296,7 @@ class GCodeGenerator {
     const extrusionMultiplier = parseFloat(this.variables.extrusion_multiplier?.[0] || 1);
     
     const extrusionWidth = nozzleDiameter * 1.125;
-    const infillOverlap = 0.1;
+    const overlapDistance = this.parseInfillOverlap(this.variables.infill_overlap?.[0] || '10%', extrusionWidth);
     
     let gcode = [];
     const digitGenerator = new DigitGenerator();
@@ -1224,12 +1363,7 @@ class GCodeGenerator {
         }
         
         if (hasInfill) {
-          let infillGcode;
-          if (isOdd) {
-            infillGcode = this.generateInfillOdd(objX, objY, objectWidth, objectHeight, layerHeight, perimeterCount, extrusionWidth, infillOverlap, extruder, allConfigs, isFirstLayer);
-          } else {
-            infillGcode = this.generateInfillEven(objX, objY, objectWidth, objectHeight, layerHeight, perimeterCount, extrusionWidth, infillOverlap, extruder, allConfigs, isFirstLayer);
-          }
+          const infillGcode = this.generateNewInfill(objX, objY, objectWidth, objectHeight, layerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, allConfigs, isFirstLayer, isOdd);
           gcode = gcode.concat(infillGcode);
         }
         
@@ -1237,7 +1371,6 @@ class GCodeGenerator {
         if (layer === 3) {
           // Виртуально рассчитываем позицию заполнения как если бы было 6 периметров
           const virtualPerimeterCount = 6;
-          const overlapDistance = extrusionWidth * infillOverlap;
           const virtualPerimeterOffset = virtualPerimeterCount * extrusionWidth - overlapDistance;
           const digitStartX = objX + virtualPerimeterOffset;
           const digitStartY = objY + virtualPerimeterOffset;

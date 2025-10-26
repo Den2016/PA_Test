@@ -27,46 +27,70 @@ class BedVisualizer {
       const width = container.clientWidth;
       const height = container.clientHeight;
 
-      // Сцена
-      this.scene = new THREE.Scene();
-      this.scene.background = new THREE.Color(0xf0f0f0);
+      // Пробуем Babylon.js сразу
 
-      // Камера
-      this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-      this.camera.position.set(100, 100, 100);
+      // Проверяем поддержку WebGL
+      if (!this.isWebGLSupported()) {
+        console.log('WebGL недоступен, используем 2D Canvas');
+        this.create2DFallback(container);
+        return;
+      }
 
-      // Используем только стабильную 2D визуализацию
-      console.log('Используем 2D визуализацию');
-      this.create2DFallback(container);
-      return;
+      // Пробуем Babylon.js
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        container.appendChild(canvas);
+        
+        this.engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+        this.scene = new BABYLON.Scene(this.engine);
+        
+        // Камера
+        this.camera = new BABYLON.ArcRotateCamera('camera', -Math.PI / 2, Math.PI / 2.5, 200, BABYLON.Vector3.Zero(), this.scene);
+        this.camera.setTarget(BABYLON.Vector3.Zero());
+        this.camera.attachControls(canvas);
+        
+        // Освещение
+        const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), this.scene);
+        light.intensity = 0.7;
+        
+        console.log('Babylon.js успешно инициализирован');
+        this.is3D = true;
+      } catch (e) {
+        console.log('Переход на 2D Canvas из-за ошибки WebGL');
+        this.create2DFallback(container);
+        return;
+      }
       
-      this.renderer.setSize(width, height);
-      container.appendChild(this.renderer.domElement);
-
-    // Контролы
-    this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.05;
-
-    // Освещение
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
-    this.scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(50, 100, 50);
-    directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
-    this.scene.add(directionalLight);
-
-      // Запуск анимации
-      this.animate();
+      // Запуск рендеринга
+      this.engine.runRenderLoop(() => {
+        this.scene.render();
+      });
 
       // Обработка изменения размера
-      window.addEventListener('resize', () => this.onWindowResize(container));
+      window.addEventListener('resize', () => {
+        this.engine.resize();
+      });
     } catch (e) {
       console.error('Ошибка инициализации 3D:', e);
       this.create2DFallback(container);
+    }
+  }
+
+  isWebGLSupported() {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return false;
+      
+      // Проверяем базовые возможности WebGL
+      const hasRequiredExtensions = gl.getExtension('OES_element_index_uint') !== null;
+      return hasRequiredExtensions;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -170,7 +194,6 @@ class BedVisualizer {
 
   createBed(width, height) {
     if (this.is2D) {
-      // Для 2D просто сохраняем размеры
       if (!this.bedData) this.bedData = { objects: [] };
       this.bedData.bedWidth = width;
       this.bedData.bedHeight = height;
@@ -179,25 +202,26 @@ class BedVisualizer {
       return;
     }
 
-    if (this.bedMesh) {
-      this.scene.remove(this.bedMesh);
+    if (this.is3D && this.scene) {
+      // Удаляем старый стол
+      if (this.bedMesh) {
+        this.bedMesh.dispose();
+      }
+
+      // Создаем новый стол
+      this.bedMesh = BABYLON.MeshBuilder.CreateBox('bed', {width: width, height: 2, depth: height}, this.scene);
+      this.bedMesh.position.y = -1;
+      this.bedMesh.position.x = width/2;
+      this.bedMesh.position.z = height/2;
+      
+      const bedMaterial = new BABYLON.StandardMaterial('bedMaterial', this.scene);
+      bedMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+      this.bedMesh.material = bedMaterial;
     }
-
-    const bedGeometry = new THREE.BoxGeometry(width, 2, height);
-    const bedMaterial = new THREE.MeshLambertMaterial({ color: 0x888888 });
-    this.bedMesh = new THREE.Mesh(bedGeometry, bedMaterial);
-    this.bedMesh.position.set(width/2, -1, height/2);
-    this.bedMesh.receiveShadow = true;
-    this.scene.add(this.bedMesh);
-
-    const gridHelper = new THREE.GridHelper(Math.max(width, height), 20, 0x444444, 0x666666);
-    gridHelper.position.set(width/2, 0, height/2);
-    this.scene.add(gridHelper);
   }
 
   updateObjects(bedWidth, bedHeight, paValues, layout, objectWidth, objectHeight) {
     if (this.is2D) {
-      // 2D визуализация
       const objects = [];
       if (layout && paValues.length) {
         for (let i = 0; i < paValues.length; i++) {
@@ -220,48 +244,32 @@ class BedVisualizer {
       return;
     }
 
-    // 3D визуализация
-    this.objects.forEach(obj => this.scene.remove(obj));
-    this.objects = [];
+    if (this.is3D && this.scene) {
+      // Удаляем старые объекты
+      this.objects.forEach(obj => obj.dispose());
+      this.objects = [];
 
-    if (!layout || !paValues.length) return;
+      if (!layout || !paValues.length) return;
 
-    for (let i = 0; i < paValues.length; i++) {
-      const row = Math.floor(i / layout.cols);
-      const col = i % layout.cols;
-      const x = layout.startX + col * (objectWidth + 5) + objectWidth/2;
-      const z = layout.startY + row * (objectHeight + 5) + objectHeight/2;
-      
-      const objectGeometry = new THREE.BoxGeometry(objectWidth, 5, objectHeight);
-      const hue = (i / paValues.length) * 0.7;
-      const objectMaterial = new THREE.MeshLambertMaterial({ 
-        color: new THREE.Color().setHSL(hue, 0.7, 0.6) 
-      });
-      const objectMesh = new THREE.Mesh(objectGeometry, objectMaterial);
-      objectMesh.position.set(x, 2.5, z);
-      objectMesh.castShadow = true;
-      this.scene.add(objectMesh);
-      this.objects.push(objectMesh);
-
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      canvas.width = 128;
-      canvas.height = 64;
-      context.fillStyle = 'white';
-      context.fillRect(0, 0, 128, 64);
-      context.fillStyle = 'black';
-      context.font = '16px Arial';
-      context.textAlign = 'center';
-      context.fillText(`PA: ${paValues[i]}`, 64, 32);
-      
-      const texture = new THREE.CanvasTexture(canvas);
-      const textMaterial = new THREE.MeshBasicMaterial({ map: texture });
-      const textGeometry = new THREE.PlaneGeometry(objectWidth * 0.8, objectHeight * 0.4);
-      const textMesh = new THREE.Mesh(textGeometry, textMaterial);
-      textMesh.position.set(x, 5.1, z);
-      textMesh.rotation.x = -Math.PI / 2;
-      this.scene.add(textMesh);
-      this.objects.push(textMesh);
+      for (let i = 0; i < paValues.length; i++) {
+        const row = Math.floor(i / layout.cols);
+        const col = i % layout.cols;
+        const x = layout.startX + col * (objectWidth + 5) + objectWidth/2;
+        const z = layout.startY + row * (objectHeight + 5) + objectHeight/2;
+        
+        // Объект
+        const objectMesh = BABYLON.MeshBuilder.CreateBox(`object${i}`, {width: objectWidth, height: 5, depth: objectHeight}, this.scene);
+        objectMesh.position.x = x;
+        objectMesh.position.y = 2.5;
+        objectMesh.position.z = z;
+        
+        const hue = (i / paValues.length) * 0.7;
+        const objectMaterial = new BABYLON.StandardMaterial(`objectMaterial${i}`, this.scene);
+        objectMaterial.diffuseColor = BABYLON.Color3.FromHSV(hue * 360, 0.7, 0.8);
+        objectMesh.material = objectMaterial;
+        
+        this.objects.push(objectMesh);
+      }
     }
   }
 
@@ -840,6 +848,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Обработчик кнопки сохранения
   document.getElementById('saveBtn').addEventListener('click', saveGCode);
   
+  // Обработчик кнопки отправки на принтер
+  document.getElementById('sendBtn').addEventListener('click', sendToPrinter);
+  
   // Загружаем сохраненные настройки при запуске
   loadSettings();
   
@@ -852,6 +863,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function checkGenerateReady() {
     const ready = selectedPrinter && selFilament.value && selPrint.value;
     document.getElementById('generateBtn').disabled = !ready;
+  }
+  
+  function updateSendButton() {
+    const hasGcode = document.getElementById('gcodeOutput').value.trim();
+    const isPhysicalPrinter = selectedPrinter && selectedPrinter.type === 'physical';
+    document.getElementById('sendBtn').disabled = !hasGcode || !isPhysicalPrinter;
   }
   
   /**
@@ -975,6 +992,68 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
+  async function sendToPrinter() {
+    const gcode = document.getElementById('gcodeOutput').value;
+    if (!gcode.trim()) {
+      alert('Нет G-code для отправки');
+      return;
+    }
+    
+    // Получаем IP принтера из физического принтера
+    if (!selectedPrinter || selectedPrinter.type !== 'physical') {
+      alert('Выберите физический принтер для отправки');
+      return;
+    }
+    
+    try {
+      const physicalConfigPath = path.join(currentSlicerPath, 'physical_printer', selectedPrinter.physicalName + '.ini');
+      const physicalConfig = parseIniFile(physicalConfigPath);
+      const printerHost = physicalConfig.print_host;
+      
+      console.log('Physical printer config:', physicalConfig);
+      console.log('Printer host:', printerHost);
+      
+      // Обрабатываем адрес с портом (например, 192.168.1.100:80)
+      let hostUrl = printerHost;
+      if (printerHost && !printerHost.startsWith('http')) {
+        hostUrl = `http://${printerHost}`;
+      }
+      
+      if (!printerHost || printerHost.trim() === '' || printerHost.includes('0.0.0.1')) {
+        alert(`IP адрес принтера некорректный: "${printerHost}".\n\nПроверьте параметр print_host в настройках физического принтера.`);
+        return;
+      }
+      
+      const filename = generateFilename();
+      const formData = new FormData();
+      const blob = new Blob([gcode], { type: 'text/plain' });
+      formData.append('file', blob, filename);
+      
+      const uploadResponse = await fetch(`${hostUrl}/server/files/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (uploadResponse.ok) {
+        const startResponse = await fetch(`${hostUrl}/printer/print/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: filename })
+        });
+        
+        if (startResponse.ok) {
+          alert(`Файл отправлен и печать запущена на ${printerHost}`);
+        } else {
+          alert(`Файл загружен, но не удалось запустить печать`);
+        }
+      } else {
+        throw new Error('Ошибка загрузки файла');
+      }
+    } catch (error) {
+      alert(`Ошибка отправки: ${error.message}`);
+    }
+  }
+
   async function saveGCode() {
     const gcode = document.getElementById('gcodeOutput').value;
     if (!gcode.trim()) {
@@ -1052,6 +1131,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       document.getElementById('gcodeOutput').value = gcode;
       document.getElementById('saveBtn').disabled = false;
+      updateSendButton();
       
       // Сохраняем настройки после успешной генерации
       saveSettings();

@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <title>PA Test Generator</title>
     <link rel="stylesheet" href="main.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
 <div class="flex">
@@ -82,6 +81,7 @@
         <h2>G-code</h2>
         <textarea id="gcodeOutput" class="gcode-output" placeholder="Здесь будет сгенерированный G-code..."></textarea>
         <button id="saveBtn" class="save-btn" disabled>Сохранить в файл</button>
+        <button id="sendBtn" class="save-btn" disabled>Отправить на принтер</button>
     </div>
     <div class="container w50">
         <h2>Предварительный просмотр</h2>
