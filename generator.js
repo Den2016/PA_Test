@@ -557,8 +557,17 @@ class GCodeGenerator {
     return null;
   }
 
-  generateNewInfill(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, configs, isFirstLayer = false, rotateLeft = true) {
-    const perimeterOffset = perimeterCount * extrusionWidth - overlapDistance;
+  generateNewInfill(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, overlapDistance, extruder, configs, isFirstLayer = false, rotateLeft = true) {
+    const extrusionWidth = extruder.getExtrusionWidth('infill');
+    
+    // Рассчитываем смещение с учетом разных ширин периметров
+    let perimeterOffset = 0;
+    for (let i = 0; i < perimeterCount; i++) {
+      const isExternal = i === 0;
+      const perimWidth = extruder.getExtrusionWidth(isExternal ? 'external_perimeter' : 'perimeter');
+      perimeterOffset += perimWidth;
+    }
+    perimeterOffset -= overlapDistance;
     const infillX1 = objX + perimeterOffset + extrusionWidth / 2;
     const infillY1 = objY + perimeterOffset + extrusionWidth / 2;
     const infillX2 = objX + objectWidth - perimeterOffset - extrusionWidth / 2;
@@ -655,8 +664,17 @@ class GCodeGenerator {
     };
   }
 
-  generatePerimeter(perimeterIndex, totalPerimeters, objX, objY, objectWidth, objectHeight, extrusionWidth, nozzleDiameter, currentLayerHeight, extruder, configs, isFirstLayer = false) {
-    const offset = perimeterIndex * extrusionWidth;
+  generatePerimeter(perimeterIndex, totalPerimeters, objX, objY, objectWidth, objectHeight, nozzleDiameter, currentLayerHeight, extruder, configs, isFirstLayer = false) {
+    const isExternal = perimeterIndex === 0;
+    const extrusionWidth = extruder.getExtrusionWidth(isExternal ? 'external_perimeter' : 'perimeter');
+    
+    // Рассчитываем смещение с учетом разных ширин периметров
+    let offset = 0;
+    for (let i = 0; i < perimeterIndex; i++) {
+      const isExternalPrev = i === 0;
+      const prevWidth = extruder.getExtrusionWidth(isExternalPrev ? 'external_perimeter' : 'perimeter');
+      offset += prevWidth;
+    }
     const x1 = objX + extrusionWidth / 2 + offset;
     const y1 = objY + extrusionWidth / 2 + offset;
     const x2 = objX + objectWidth - extrusionWidth / 2 - offset;
@@ -673,7 +691,6 @@ class GCodeGenerator {
     
     let perimeterGcode = [];
     
-    const isExternal = perimeterIndex === 0;
     if (isExternal) {
       perimeterGcode.push(';TYPE:External perimeter');
     } else {
@@ -1313,8 +1330,13 @@ class GCodeGenerator {
     const filamentDiameter = parseFloat(this.variables.filament_diameter[0]);
     const extrusionMultiplier = parseFloat(this.variables.extrusion_multiplier?.[0] || 1);
     
-    const extrusionWidth = nozzleDiameter * 1.125;
-    const overlapDistance = this.parseInfillOverlap(this.variables.infill_overlap?.[0] || '10%', extrusionWidth);
+    // Создаем экструдер и инициализируем ширины
+    const maxVolumetricSpeed = parseFloat(this.variables.max_volumetric_speed?.[0] || 15.0);
+    const extruder = new Extruder(filamentDiameter, extrusionMultiplier, maxVolumetricSpeed);
+    extruder.initializeWidths(this.variables, nozzleDiameter, layerHeight, firstLayerHeight);
+    
+    const infillExtrusionWidth = extruder.getExtrusionWidth('infill');
+    const overlapDistance = this.parseInfillOverlap(this.variables.infill_overlap?.[0] || '10%', infillExtrusionWidth);
     
     let gcode = [];
     const digitGenerator = new DigitGenerator();
@@ -1370,18 +1392,16 @@ class GCodeGenerator {
         gcode.push(`; Object ${objIndex + 1}, PA: ${paValue}`);
         gcode.push(`M900 K${paValue}`);
         
-        const maxVolumetricSpeed = getConfigValue('max_volumetric_speed', 15.0);
-        const extruder = new Extruder(filamentDiameter, extrusionMultiplier, maxVolumetricSpeed);
-        
         const isFirstLayer = layer === 0;
+        extruder.setLayer(isFirstLayer);
         
         for (let p = perimeterCount - 1; p >= 0; p--) {
-          const perimeterGcode = this.generatePerimeter(p, perimeterCount, objX, objY, objectWidth, objectHeight, extrusionWidth, nozzleDiameter, layerHeight, extruder, allConfigs, isFirstLayer);
+          const perimeterGcode = this.generatePerimeter(p, perimeterCount, objX, objY, objectWidth, objectHeight, nozzleDiameter, layerHeight, extruder, allConfigs, isFirstLayer);
           gcode = gcode.concat(perimeterGcode);
         }
         
         if (hasInfill) {
-          const infillGcode = this.generateNewInfill(objX, objY, objectWidth, objectHeight, layerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, allConfigs, isFirstLayer, isOdd);
+          const infillGcode = this.generateNewInfill(objX, objY, objectWidth, objectHeight, layerHeight, perimeterCount, overlapDistance, extruder, allConfigs, isFirstLayer, isOdd);
           gcode = gcode.concat(infillGcode);
         }
         
@@ -1389,7 +1409,8 @@ class GCodeGenerator {
         if (layer === 3) {
           // Виртуально рассчитываем позицию заполнения как если бы было 6 периметров
           const virtualPerimeterCount = 6;
-          const virtualPerimeterOffset = virtualPerimeterCount * extrusionWidth - overlapDistance;
+          const perimeterWidth = extruder.getExtrusionWidth('perimeter');
+          const virtualPerimeterOffset = virtualPerimeterCount * perimeterWidth - overlapDistance;
           const digitStartX = objX + virtualPerimeterOffset;
           const digitStartY = objY + virtualPerimeterOffset;
           

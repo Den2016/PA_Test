@@ -12,6 +12,107 @@ class Extruder {
     
     // Площадь поперечного сечения филамента
     this.filamentArea = Math.PI * Math.pow(filamentDiameter / 2, 2);
+    
+    // Параметры слоя и ширин экструзии
+    this.nozzleDiameter = 0.4;
+    this.layerHeight = 0.2;
+    this.firstLayerHeight = 0.3;
+    this.isFirstLayer = false;
+    
+    // Ширины экструзии
+    this.extrusionWidth = 0;
+    this.perimeterExtrusionWidth = 0;
+    this.externalPerimeterExtrusionWidth = 0;
+    this.infillExtrusionWidth = 0;
+    this.firstLayerExtrusionWidth = 0;
+  }
+
+  initializeWidths(configs, nozzleDiameter, layerHeight, firstLayerHeight) {
+    this.nozzleDiameter = nozzleDiameter;
+    this.layerHeight = layerHeight;
+    this.firstLayerHeight = firstLayerHeight;
+    
+    // Базовая ширина экструзии
+    this.extrusionWidth = this.calculateExtrusionWidth(
+      configs.extrusion_width, 
+      nozzleDiameter, 
+      layerHeight, 
+      nozzleDiameter * 1.125
+    );
+    
+    // Специфичные ширины
+    this.perimeterExtrusionWidth = this.calculateExtrusionWidth(
+      configs.perimeter_extrusion_width,
+      nozzleDiameter,
+      layerHeight,
+      this.extrusionWidth
+    );
+    
+    this.externalPerimeterExtrusionWidth = this.calculateExtrusionWidth(
+      configs.external_perimeter_extrusion_width,
+      nozzleDiameter,
+      layerHeight,
+      this.extrusionWidth
+    );
+    
+    this.infillExtrusionWidth = this.calculateExtrusionWidth(
+      configs.infill_extrusion_width,
+      nozzleDiameter,
+      layerHeight,
+      this.extrusionWidth
+    );
+    
+    this.firstLayerExtrusionWidth = this.calculateExtrusionWidth(
+      configs.first_layer_extrusion_width,
+      nozzleDiameter,
+      firstLayerHeight,
+      this.extrusionWidth
+    );
+  }
+
+  calculateExtrusionWidth(configValue, nozzleDiameter, layerHeight, defaultValue) {
+    // Получаем значение из конфига (может быть массивом)
+    let value = configValue;
+    if (Array.isArray(value)) {
+      value = value[0];
+    }
+    
+    // Если не задано или равно 0 - используем значение по умолчанию
+    if (!value || value === '0' || value === '') {
+      return defaultValue;
+    }
+    
+    // Если в процентах - рассчитываем от высоты слоя
+    if (typeof value === 'string' && value.endsWith('%')) {
+      const percentage = parseFloat(value) / 100;
+      return layerHeight * percentage;
+    }
+    
+    // Иначе используем числовое значение
+    return parseFloat(value);
+  }
+
+  setLayer(isFirstLayer) {
+    this.isFirstLayer = isFirstLayer;
+  }
+
+  getExtrusionWidth(type) {
+    // Если первый слой и задана специальная ширина - используем её для всех типов
+    if (this.isFirstLayer && this.firstLayerExtrusionWidth !== this.extrusionWidth) {
+      return this.firstLayerExtrusionWidth;
+    }
+    
+    // Иначе используем специфичную ширину для типа
+    switch (type) {
+      case 'external_perimeter':
+        return this.externalPerimeterExtrusionWidth;
+      case 'perimeter':
+        return this.perimeterExtrusionWidth;
+      case 'infill':
+        return this.infillExtrusionWidth;
+      default:
+        return this.extrusionWidth;
+    }
   }
 
   setRetractSettings(length, speed, beforeTravel, useFirmware = false) {

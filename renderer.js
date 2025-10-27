@@ -902,8 +902,10 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
       const filamentConfigPath = path.join(currentSlicerPath, 'filament', selFilament.value + '.ini');
+      const printConfigPath = path.join(currentSlicerPath, 'print', selPrint.value + '.ini');
       const printerConfig = parseIniFile(printerConfigPath);
       const filamentConfig = parseIniFile(filamentConfigPath);
+      const printConfig = parseIniFile(printConfigPath);
       
       // Получаем параметры PA теста
       const startPA = parseFloat(document.getElementById('startPA').value) || 0;
@@ -952,22 +954,107 @@ document.addEventListener('DOMContentLoaded', () => {
       const printMaxY = layout.startY + layout.totalHeight;
       
       // Расчет материала
-      const layerHeight = parseFloat(filamentConfig.layer_height || '0.2');
+      const layerHeight = parseFloat(printConfig.layer_height || filamentConfig.layer_height || '0.2');
+      const firstLayerHeight = parseFloat(printConfig.first_layer_height || filamentConfig.first_layer_height || '0.3');
       const filamentDiameter = parseFloat(filamentConfig.filament_diameter || '1.75');
-      const filamentDensity = parseFloat(filamentConfig.filament_density || '1.24'); // PLA по умолчанию
-      const filamentCost = parseFloat(filamentConfig.filament_cost || '25'); // за кг
+      const filamentDensity = parseFloat(filamentConfig.filament_density || '1.24');
+      const filamentCost = parseFloat(filamentConfig.filament_cost || '25');
       
-      // Примерный объем филамента (упрощенный расчет)
+      // Примерный объем филамента
       const layerCount = 25;
-      const volumePerObject = objectWidth * objectHeight * layerHeight * layerCount * 0.3; // 30% заполнение
-      const totalVolume = volumePerObject * paValues.length; // мм³
+      const maxLayerZ = firstLayerHeight + (layerCount - 1) * layerHeight;
+      const volumePerObject = objectWidth * objectHeight * layerHeight * layerCount * 0.3;
+      const totalVolume = volumePerObject * paValues.length;
       
       const filamentCrossSectionArea = Math.PI * Math.pow(filamentDiameter / 2, 2);
-      const filamentLength = totalVolume / filamentCrossSectionArea; // мм
-      const filamentWeight = (totalVolume / 1000) * filamentDensity; // граммы
-      const materialCost = (filamentWeight / 1000) * filamentCost; // стоимость
+      const filamentLength = totalVolume / filamentCrossSectionArea;
+      const filamentWeight = (totalVolume / 1000) * filamentDensity;
+      const materialCost = (filamentWeight / 1000) * filamentCost;
+      
+      // Функция получения значения из конфигов
+      const getConfigValue = (key, defaultValue = '') => {
+        return printConfig[key] || filamentConfig[key] || printerConfig[key] || defaultValue;
+      };
       
       return {
+        // Геометрические параметры
+        'scale': '1',
+        'object_copies_num': paValues.length.toString(),
+        'layer_height': layerHeight.toFixed(3),
+        'first_layer_height': firstLayerHeight.toFixed(3),
+        'initial_layer_height': firstLayerHeight.toFixed(3),
+        'layer_z': firstLayerHeight.toFixed(3),
+        'max_layer_z': maxLayerZ.toFixed(3),
+        'nozzle_diameter': nozzleDiameter.toFixed(3),
+        'perimeters': getConfigValue('perimeters', '2'),
+        'infill_overlap': getConfigValue('infill_overlap', '10%'),
+        
+        // Скоростные параметры
+        'print_speed': getConfigValue('print_speed', '50'),
+        'first_layer_speed': getConfigValue('first_layer_speed', '30'),
+        'perimeter_speed': getConfigValue('perimeter_speed', '50'),
+        'external_perimeter_speed': getConfigValue('external_perimeter_speed', '50%'),
+        'small_perimeter_speed': getConfigValue('small_perimeter_speed', '50%'),
+        'infill_speed': getConfigValue('infill_speed', '80'),
+        'travel_speed': getConfigValue('travel_speed', '150'),
+        'bridge_speed': getConfigValue('bridge_speed', '60'),
+        'gap_fill_speed': getConfigValue('gap_fill_speed', '20'),
+        
+        // Параметры материала
+        'filament_diameter': filamentDiameter.toFixed(3),
+        'extrusion_multiplier': getConfigValue('extrusion_multiplier', '1'),
+        'temperature': getConfigValue('temperature', '200'),
+        'bed_temperature': getConfigValue('bed_temperature', '60'),
+        'first_layer_temperature': getConfigValue('first_layer_temperature', getConfigValue('temperature', '200')),
+        'first_layer_bed_temperature': getConfigValue('first_layer_bed_temperature', getConfigValue('bed_temperature', '60')),
+        'filament_type': getConfigValue('filament_type', 'PLA'),
+        'filament_soluble': getConfigValue('filament_soluble', '0'),
+        'filament_cost': filamentCost.toFixed(2),
+        'filament_density': filamentDensity.toFixed(2),
+        'filament_colour': getConfigValue('filament_colour', getConfigValue('filament_color', '#FFFFFF')),
+        'filament_color': getConfigValue('filament_color', getConfigValue('filament_colour', '#FFFFFF')),
+        
+        // Параметры отката
+        'retract_length': getConfigValue('retract_length', '0.8'),
+        'retract_speed': getConfigValue('retract_speed', '35'),
+        'retract_restart_extra': getConfigValue('retract_restart_extra', '0'),
+        'retract_before_travel': getConfigValue('retract_before_travel', '2'),
+        
+        // Параметры заполнения
+        'fill_density': getConfigValue('fill_density', getConfigValue('infill_density', '20%')),
+        'infill_density': getConfigValue('infill_density', getConfigValue('fill_density', '20%')),
+        'fill_pattern': getConfigValue('fill_pattern', getConfigValue('infill_pattern', 'rectilinear')),
+        'infill_pattern': getConfigValue('infill_pattern', getConfigValue('fill_pattern', 'rectilinear')),
+        'top_fill_pattern': getConfigValue('top_fill_pattern', 'rectilinear'),
+        'bottom_fill_pattern': getConfigValue('bottom_fill_pattern', 'rectilinear'),
+        
+        // Ширины экструзии
+        'perimeter_extrusion_width': getConfigValue('perimeter_extrusion_width', (nozzleDiameter * 1.125).toFixed(3)),
+        'external_perimeter_extrusion_width': getConfigValue('external_perimeter_extrusion_width', (nozzleDiameter * 1.125).toFixed(3)),
+        'infill_extrusion_width': getConfigValue('infill_extrusion_width', (nozzleDiameter * 1.125).toFixed(3)),
+        'solid_infill_extrusion_width': getConfigValue('solid_infill_extrusion_width', (nozzleDiameter * 1.125).toFixed(3)),
+        'top_infill_extrusion_width': getConfigValue('top_infill_extrusion_width', (nozzleDiameter * 1.125).toFixed(3)),
+        
+        // Параметры поддержек (не используются в PA тесте)
+        'support_material': '0',
+        'support_material_threshold': getConfigValue('support_material_threshold', '0'),
+        'support_material_pattern': getConfigValue('support_material_pattern', 'rectilinear'),
+        'support_material_spacing': getConfigValue('support_material_spacing', '2.5'),
+        
+        // Параметры охлаждения
+        'cooling': getConfigValue('cooling', '1'),
+        'fan_always_on': getConfigValue('fan_always_on', '0'),
+        'max_fan_speed': getConfigValue('max_fan_speed', '100'),
+        'min_fan_speed': getConfigValue('min_fan_speed', '35'),
+        'min_print_speed': getConfigValue('min_print_speed', '10'),
+        'slowdown_below_layer_time': getConfigValue('slowdown_below_layer_time', '5'),
+        
+        // Параметры принтера
+        'printer_model': getConfigValue('printer_model', selectedPrinter.name),
+        'printer_variant': getConfigValue('printer_variant', ''),
+        'printer_vendor': getConfigValue('printer_vendor', ''),
+        'z_offset': getConfigValue('z_offset', '0'),
+        
         // Границы печати
         'first_layer_print_min[0]': printMinX.toFixed(2),
         'first_layer_print_max[0]': printMaxX.toFixed(2),
@@ -983,14 +1070,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Материал
         'filament_used[0]': filamentLength.toFixed(1),
         'filament_weight[0]': filamentWeight.toFixed(2),
-        'filament_cost[0]': materialCost.toFixed(2),
         'total_weight': filamentWeight.toFixed(2),
         'total_cost': materialCost.toFixed(2),
         
-        // Дополнительные
+        // Вычисляемые параметры
+        'total_toolchanges': '0',
+        'total_layer_count': layerCount.toString(),
+        'version': 'PA_Generator_1.0',
+        'preset_name': selPrint.value,
+        
+        // Временные параметры
+        'timestamp': new Date().toISOString().replace(/[:.]/g, '-'),
+        'date': new Date().toLocaleDateString('ru-RU'),
+        'time': new Date().toLocaleTimeString('ru-RU'),
+        
+        // PA тест специфичные
+        'pa_start': startPA.toString(),
+        'pa_end': endPA.toString(),
+        'pa_step': stepPA.toString(),
+        'test_objects': paValues.length.toString(),
         'object_count': paValues.length.toString(),
-        'pa_range': `${startPA}-${endPA}`,
-        'pa_step': stepPA.toString()
+        'pa_range': `${startPA}-${endPA}`
       };
     } catch (e) {
       console.error('Ошибка расчета плейсхолдеров:', e);
