@@ -5,3 +5,5 @@ dist/
 settings.json
 .idea/
 .amazonq/
+.test_results/
+/test_results/

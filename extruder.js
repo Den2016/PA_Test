@@ -159,6 +159,11 @@ class Extruder {
    * @returns {number} ограниченная скорость (мм/с)
    */
   limitSpeedByVolumetricFlow(requestedSpeed, width, height) {
+    // Если ограничение объемного расхода равно нулю - не контролируем
+    if (this.maxVolumetricFlow <= 0) {
+      return requestedSpeed;
+    }
+    
     const crossSection = this.calculateExtrusionCrossSection(width, height);
     const maxSpeed = this.getMaxSpeedForCrossSection(crossSection);
     

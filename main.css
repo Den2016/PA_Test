@@ -31,7 +31,17 @@ h1 {
 .form-group {
   margin-bottom: 12px;
 }
-
+.form-group label {
+    display: inline-block;
+    min-width: 16%;
+}
+.form-group select {
+    max-width: 100%;
+    width: auto;
+}
+.form-group input[type='number'] {
+    width: auto;
+}
 label {
   display: block;
   margin-bottom: 4px;
@@ -214,6 +224,16 @@ h2 {
   font-weight: 400;
 }
 
+h3 {
+  color: #333;
+  margin-bottom: 8px;
+  margin-top: 15px;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .flex {
     display: flex;
     flex-wrap: wrap;
@@ -245,4 +265,33 @@ h2 {
     display: block;
     width: 100% !important;
     height: 100% !important;
+}
+
+.config-info {
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    border-radius: 6px;
+    padding: 15px;
+    font-size: 14px;
+}
+
+.config-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.config-details > div {
+    padding: 4px 0;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.config-details > div:last-child,
+.config-details > div:nth-last-child(2) {
+    border-bottom: none;
+}
+
+.config-details strong {
+    color: #495057;
+    font-weight: 600;
 }
