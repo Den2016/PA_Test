@@ -187,10 +187,16 @@ class OrcaConfigParser {
                         let config = JSON.parse(fs.readFileSync(filename, 'utf8'));
 
                         if (config.inherits) {
-                            let inheritConfig = this.getSystemPrinterConfig(config.inherits);
-                            if (inheritConfig !== null) {
-                                config = { ...inheritConfig, ...config };
-                            }
+                            let inheritConfig = {'inherits': config.inherits};
+                            while(inheritConfig['inherits']) {
+                                let icPath = path.join(this.systemPath, dir, 'machine', inheritConfig.inherits+'.json');
+                                if(fs.existsSync(icPath)) {
+                                    inheritConfig = JSON.parse(fs.readFileSync(icPath, 'utf8'));
+                                    if (inheritConfig !== null) {
+                                        config = { ...inheritConfig, ...config };
+                                    }
+                                }
+                            };
                         }
                         return config; // Возвращаем найденную конфигурацию
                     }

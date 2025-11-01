@@ -8,6 +8,19 @@ let currentSlicer = '';
 let currentSlicerPath = '';
 let selectedPrinter = null;
 
+const SlicerInfo = require('./slicer');
+const printer = require("./slicer");
+
+const OrcaSlicer = new SlicerInfo('OrcaSlicer', 'orca');
+const PrusaSlicer = new SlicerInfo('PrusaSlicer');
+const QIDISlicer = new SlicerInfo('QIDISlicer');
+
+const slicers = {
+    'orca': OrcaSlicer,
+    'prusa': PrusaSlicer,
+    'qidi': QIDISlicer,
+}
+
 // Путь к файлу настроек
 const settingsPath = path.join(__dirname, 'settings.json');
 
@@ -294,31 +307,59 @@ document.addEventListener('DOMContentLoaded', () => {
     const selFilament = document.getElementById('selFilament');
     const selPrint = document.getElementById('selPrint');
 
+    // необходимо создать список слайсеров, присутствующих на компьютере
+    let html = '';
+    if (OrcaSlicer.isPresent) html += `<option value="orca">Orca slicer</option>`;
+    if (PrusaSlicer.isPresent) html += `<option value="prusa">Prusa slicer</option>`;
+    if (QIDISlicer.isPresent) html += `<option value="qidi">QIDI slicer</option>`
+    selSlicer.innerHTML = html;
+
+
     selSlicer.addEventListener('change', (e) => {
         currentSlicer = e.target.value;
         loadPrinters(currentSlicer);
     });
 
     selPrinter.addEventListener('change', (e) => {
-        const printerName = e.target.value;
-        clearGeneratedGCode();
-        if (printerName) {
-            if (currentSlicer === 'orca') {
-                selectedPrinter = {type: 'orca', name: printerName};
-                loadOrcaFilaments();
-                loadOrcaProcesses();
-            } else {
-                selectedPrinter = parsePrinterName(printerName);
-                initializePrinterSelection();
-            }
-            loadPrinterSettings(printerName);
-            updateConfigInfo();
-        } else {
-            selFilament.disabled = true;
-            selPrint.disabled = true;
-            updateConfigInfo();
-        }
+        const slicer = slicers[currentSlicer];
+        slicer.printerName = e.target.value;
+        printerChanged();
+
+        // if (printerName) {
+        //
+        //     if (currentSlicer === 'orca') {
+        //         selectedPrinter = {type: 'orca', name: printerName};
+        //         loadOrcaFilaments();
+        //         loadOrcaProcesses();
+        //     } else {
+        //         selectedPrinter = parsePrinterName(printerName);
+        //         initializePrinterSelection();
+        //     }
+        //     loadPrinterSettings(printerName);
+        //     updateConfigInfo();
+        // } else {
+        //     selFilament.disabled = true;
+        //     selPrint.disabled = true;
+        //     updateConfigInfo();
+        // }
     });
+
+    function printerChanged(){
+        clearGeneratedGCode();
+        const slicer = slicers[currentSlicer];
+        slicer.getCompatiblePrints();
+        slicer.getCompatibleFilaments();
+        const filaments = slicer.filaments;
+        if(filaments && filaments.length) {
+            updateFilamentSelect(filaments,filaments[0]);
+        }
+        const prints = slicer.prints;
+        if(prints && prints.length) {
+            updatePrintSelect(prints,prints[0]);
+        }
+        updateConfigInfo();
+
+    }
 
     function clearGeneratedGCode() {
         document.getElementById('gcodeOutput').value = '';
@@ -336,6 +377,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     selFilament.addEventListener('change', (e) => {
+        const slicer = slicers[currentSlicer];
+        slicer.filamentName = e.target.value;
         clearGeneratedGCode();
         if (currentSlicer === 'orca') {
             checkGenerateReady();
@@ -346,6 +389,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     selPrint.addEventListener('change', (e) => {
+        const slicer=slicers[currentSlicer];
+        slicer.printName = e.target.value;
         clearGeneratedGCode();
         if (currentSlicer === 'orca') {
             checkGenerateReady();
@@ -356,16 +401,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function loadPrinters(slicer) {
-        if (slicer === 'orca') {
-            loadOrcaPrinters();
-            return;
+        let sl = slicers[slicer]
+        sl.loadPrinters()
+        let options = '';
+        sl.printers.forEach(p => {
+            options += `<option value="${p.name}">${p.name}</option>`;
+        });
+
+        if (sl.physicalPrinters.length > 0) {
+            options += '<option disabled>--- Физические принтеры ---</option>';
+            sl.physicalPrinters.forEach(p => {
+                options += `<option value="${p.name}">${p.name}</option>`;
+            });
         }
 
-        const appData = process.env.APPDATA;
-        const slicerPaths = {
-            qidi: path.join(appData, 'QIDISlicer'),
-            prusa: path.join(appData, 'PrusaSlicer')
-        };
+        selPrinter.innerHTML = options;
+        selPrinter.disabled = false;
+
+        /*
 
         const slicerPath = slicerPaths[slicer];
         if (!fs.existsSync(slicerPath)) {
@@ -428,6 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         selPrinter.innerHTML = options;
         selPrinter.disabled = false;
+        */
     }
 
     function parsePrinterName(printerName) {
@@ -555,22 +609,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function initializePrinterSelection() {
-        if (!selectedPrinter || !selectedPrinter.name) {
-            selFilament.disabled = true;
-            selPrint.disabled = true;
-            return;
-        }
-
-        const printSettings = getCompatiblePrintSettings();
-        updatePrintSelect(printSettings, printSettings[0] || '');
-
-        const filaments = getCompatibleFilaments();
-        updateFilamentSelect(filaments, filaments[0] || '');
-
-        const newPrintSettings = getCompatiblePrintSettings();
-        const currentPrint = selPrint.value;
-        const finalPrint = newPrintSettings.includes(currentPrint) ? currentPrint : (newPrintSettings[0] || '');
-        updatePrintSelect(newPrintSettings, finalPrint);
+        // if (!selectedPrinter || !selectedPrinter.name) {
+        //     selFilament.disabled = true;
+        //     selPrint.disabled = true;
+        //     return;
+        // }
+        //
+        // const printSettings = getCompatiblePrintSettings();
+        // updatePrintSelect(printSettings, printSettings[0] || '');
+        //
+        // const filaments = getCompatibleFilaments();
+        // updateFilamentSelect(filaments, filaments[0] || '');
+        //
+        // const newPrintSettings = getCompatiblePrintSettings();
+        // const currentPrint = selPrint.value;
+        // const finalPrint = newPrintSettings.includes(currentPrint) ? currentPrint : (newPrintSettings[0] || '');
+        // updatePrintSelect(newPrintSettings, finalPrint);
     }
 
     function getCompatiblePrintSettings() {
@@ -611,7 +665,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getCompatibleFilaments() {
-        const filamentPath = path.join(currentSlicerPath, 'filament');
+        let slicer = slicers[currentSlicer];
+        slicer.getCompatibleFilaments();
+        return slicer.filaments;
+        /*const filamentPath = path.join(currentSlicerPath, 'filament');
         if (!fs.existsSync(filamentPath)) return [];
 
         if (!selectedPrinter || !selectedPrinter.name || selectedPrinter.name === '' || selectedPrinter.name.includes('Выберите')) {
@@ -645,10 +702,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         return compatible.sort((a, b) => a.localeCompare(b));
+        */
     }
 
     function updatePrintSelect(options, selectedValue) {
-        let html = '<option value="">Выберите настройки печати</option>';
+        let html = '';
         options.forEach(name => {
             html += `<option value="${name}">${name}</option>`;
         });
@@ -659,7 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateFilamentSelect(options, selectedValue) {
-        let html = '<option value="">Выберите материал</option>';
+        let html = '';
         options.forEach(name => {
             html += `<option value="${name}">${name}</option>`;
         });
@@ -976,7 +1034,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('beforeunload', saveSettings);
 
     function checkGenerateReady() {
-        const ready = selectedPrinter && selFilament.value && selPrint.value;
+        const ready = selPrinter.value && selFilament.value && selPrint.value;
         document.getElementById('generateBtn').disabled = !ready;
     }
 
@@ -1432,7 +1490,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if ((!selectedPrinter || selectedPrinter.type !== 'physical') && !(selectedPrinter.type === 'orca' && typeof selectedPrinter.print_host ==="string")) {
+        if ((!selectedPrinter || selectedPrinter.type !== 'physical') && !(selectedPrinter.type === 'orca' && typeof selectedPrinter.print_host === "string")) {
 
             alert('Выберите физический принтер для отправки');
             return;
@@ -1548,7 +1606,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function generateGCode() {
-        if (!selectedPrinter || !selFilament.value || !selPrint.value) {
+        if (!selPrinter.value || !selFilament.value || !selPrint.value) {
             alert('Выберите принтер, материал и настройки печати');
             return;
         }
@@ -1598,8 +1656,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let printers = orca.parser.getPrinters();
             for (let i = 0; i < printers.length; i++) {
                 const printer = printers[i];
-                if ('*'+printer.name == selectedPrinter.name) { // не очень хорошо, но как уж есть....
-                    console.log('selectedPrinter',selectedPrinter);
+                if ('*' + printer.name == selectedPrinter.name) { // не очень хорошо, но как уж есть....
+                    console.log('selectedPrinter', selectedPrinter);
                     selectedPrinter.print_host = printer.print_host;
                 }
             }
@@ -1621,23 +1679,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (settings.lastSlicer) {
                     selSlicer.value = settings.lastSlicer;
                     currentSlicer = settings.lastSlicer;
+
                     loadPrinters(currentSlicer);
 
-                    setTimeout(() => {
-                        if (settings.lastPrinter && selPrinter.querySelector(`option[value="${settings.lastPrinter}"]`)) {
-                            selPrinter.value = settings.lastPrinter;
-                            if (currentSlicer === 'orca') {
-                                selectedPrinter = {type: 'orca', name: settings.lastPrinter};
-                                loadOrcaFilaments();
-                                loadOrcaProcesses();
-                            } else {
-                                selectedPrinter = parsePrinterName(settings.lastPrinter);
-                                initializePrinterSelection();
-                            }
-                            loadPrinterSettings(settings.lastPrinter);
-                            updateConfigInfo();
+                    if (settings.lastPrinter && selPrinter.querySelector(`option[value="${settings.lastPrinter}"]`)) {
+                        selPrinter.value = settings.lastPrinter;
+                        const slicer = slicers[currentSlicer];
+                        slicer.printerName = settings.lastPrinter;
+                        slicer.filamentName = settings.slicers?.[currentSlicer]?.printers?.[settings.lastPrinter]?.filament;
+                        slicer.printName = settings.slicers?.[currentSlicer]?.printers?.[settings.lastPrinter]?.print;
+                        const pa = settings.slicers?.[currentSlicer]?.printers?.[settings.lastPrinter]?.paSettings;
+                        if(pa){
+                            if (pa.startPA !== undefined) document.getElementById('startPA').value = pa.startPA;
+                            if (pa.endPA !== undefined) document.getElementById('endPA').value = pa.endPA;
+                            if (pa.stepPA !== undefined) document.getElementById('stepPA').value = pa.stepPA;
                         }
-                    }, 100);
+
+                        printerChanged();
+                        setTimeout(() => {
+                            calculatePACount();
+                            checkGenerateReady();
+                        }, 100);
+                        updateConfigInfo();
+                    }
+
+                    setTimeout(() => {
+                        // загружаем настройки по таймауту, чтобы DOM успел сформироваться
+                    }, 200);
                 }
             }
         } catch (e) {
@@ -1882,7 +1950,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const infoDiv = document.getElementById('config-info');
         if (!infoDiv) return;
 
-        if (!selectedPrinter || !selFilament.value || !selPrint.value) {
+        if (!selPrinter.value || !selFilament.value || !selPrint.value) {
             infoDiv.innerHTML = '<p>Выберите слайсер, принтер, филамент и настройки печати</p>';
             return;
         }
@@ -1892,6 +1960,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             updateStandardConfigInfo(infoDiv);
         }
+        checkGenerateReady();
     }
 
     function updateOrcaConfigInfo(info) {
@@ -1934,14 +2003,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateOrcaConfigInfo(info);
                 return;
             }
+            const slicer = slicers[currentSlicer];
+            // const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
+            // const filamentConfigPath = path.join(currentSlicerPath, 'filament', selFilament.value + '.ini');
+            // const printConfigPath = path.join(currentSlicerPath, 'print', selPrint.value + '.ini');
 
-            const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
-            const filamentConfigPath = path.join(currentSlicerPath, 'filament', selFilament.value + '.ini');
-            const printConfigPath = path.join(currentSlicerPath, 'print', selPrint.value + '.ini');
-
-            const printerConfig = parseIniFile(printerConfigPath);
-            const filamentConfig = parseIniFile(filamentConfigPath);
-            const printConfig = parseIniFile(printConfigPath);
+            const printerConfig = slicer.printerConfig;
+            const filamentConfig = slicer.filamentConfig;
+            const printConfig = slicer.printConfig;
 
             const bedShape = printerConfig.bed_shape || '';
             let bedSize = 'Неизвестно';
@@ -1962,7 +2031,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             info.innerHTML = `
         <div class="config-details">
-          <div><strong>Принтер:</strong> ${selectedPrinter.name}</div>
+          <div><strong>Принтер:</strong> ${slicer.printerName}</div>
           <div><strong>Диаметр сопла:</strong> ${printerConfig.nozzle_diameter?.split(';')[0] || 'Неизвестно'}мм</div>
           <div><strong>Размер стола:</strong> ${bedSize}</div>
           <div><strong>Тип филамента:</strong> ${filamentConfig.filament_type || 'Неизвестно'}</div>
@@ -1970,7 +2039,6 @@ document.addEventListener('DOMContentLoaded', () => {
           <div><strong>Температура стола:</strong> ${filamentConfig.bed_temperature || 'Неизвестно'}°C</div>
           <div><strong>Высота слоя:</strong> ${printConfig.layer_height || 'Неизвестно'}мм</div>
           <div><strong>Объемный расход:</strong> ${volumetricDisplay}</div>
-          <div><strong>Заполнение:</strong> ${printConfig.fill_density || printConfig.infill_density || 'Неизвестно'}</div>
         </div>
       `;
         } catch (e) {
