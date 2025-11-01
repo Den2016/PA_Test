@@ -314,6 +314,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (QIDISlicer.isPresent) html += `<option value="qidi">QIDI slicer</option>`
     selSlicer.innerHTML = html;
 
+    loadSettings();
+    updateConfigInfo();
 
     selSlicer.addEventListener('change', (e) => {
         currentSlicer = e.target.value;
@@ -380,11 +382,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const slicer = slicers[currentSlicer];
         slicer.filamentName = e.target.value;
         clearGeneratedGCode();
-        if (currentSlicer === 'orca') {
             checkGenerateReady();
-        } else {
             updatePrintSettings();
-        }
         updateConfigInfo();
     });
 
@@ -1026,10 +1025,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Загружаем настройки после небольшой задержки
-    setTimeout(() => {
-        loadSettings();
-    }, 500);
+    // // Загружаем настройки после небольшой задержки
+    // setTimeout(() => {
+    //     loadSettings();
+    // }, 500);
 
     window.addEventListener('beforeunload', saveSettings);
 
@@ -1687,7 +1686,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         const slicer = slicers[currentSlicer];
                         slicer.printerName = settings.lastPrinter;
                         slicer.filamentName = settings.slicers?.[currentSlicer]?.printers?.[settings.lastPrinter]?.filament;
+                        if(!slicer.filamentName){
+                            printerChanged();
+                            if(slicer.filaments?.length) slicer.filamentName=slicer.filaments[0];
+                            if(slicer.prints?.length) slicer.printName=slicer.prints[0];
+                            return;
+                        }
                         slicer.printName = settings.slicers?.[currentSlicer]?.printers?.[settings.lastPrinter]?.print;
+                        if(!slicer.printName){
+                            if(slicer.prints?.length) slicer.printName=slicer.prints;
+
+                            return;
+                        }
                         const pa = settings.slicers?.[currentSlicer]?.printers?.[settings.lastPrinter]?.paSettings;
                         if(pa){
                             if (pa.startPA !== undefined) document.getElementById('startPA').value = pa.startPA;
@@ -1696,10 +1706,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
 
                         printerChanged();
-                        setTimeout(() => {
+                        //setTimeout(() => {
                             calculatePACount();
                             checkGenerateReady();
-                        }, 100);
+                        //}, 100);
                         updateConfigInfo();
                     }
 
@@ -1713,51 +1723,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function loadPrinterSettings(printerName) {
-        try {
-            if (fs.existsSync(settingsPath)) {
-                const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-                const printerSettings = settings.slicers?.[currentSlicer]?.printers?.[printerName];
-
-                if (printerSettings) {
-                    setTimeout(() => {
-                        if (printerSettings.filament && selFilament.querySelector(`option[value="${printerSettings.filament}"]`)) {
-                            selFilament.value = printerSettings.filament;
-                            if (currentSlicer === 'orca') {
-                                // Для Orca ничего дополнительно не делаем
-                            } else {
-                                updatePrintSettings();
-                            }
-
-                            setTimeout(() => {
-                                if (printerSettings.print && selPrint.querySelector(`option[value="${printerSettings.print}"]`)) {
-                                    selPrint.value = printerSettings.print;
-                                }
-                                setTimeout(() => {
-                                    calculatePACount();
-                                    updateConfigInfo();
-                                    checkGenerateReady();
-                                }, 50);
-                            }, 100);
-                        }
-                    }, 200);
-
-                    if (printerSettings.paSettings) {
-                        const pa = printerSettings.paSettings;
-                        if (pa.startPA !== undefined) document.getElementById('startPA').value = pa.startPA;
-                        if (pa.endPA !== undefined) document.getElementById('endPA').value = pa.endPA;
-                        if (pa.stepPA !== undefined) document.getElementById('stepPA').value = pa.stepPA;
-                        setTimeout(() => {
-                            calculatePACount();
-                            checkGenerateReady();
-                        }, 100);
-                    }
-                }
-            }
-        } catch (e) {
-            console.error('Ошибка загрузки настроек принтера:', e);
-        }
-    }
+    // function loadPrinterSettings(printerName) {
+    //     try {
+    //         if (fs.existsSync(settingsPath)) {
+    //             const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    //             const printerSettings = settings.slicers?.[currentSlicer]?.printers?.[printerName];
+    //
+    //             if (printerSettings) {
+    //                 setTimeout(() => {
+    //                     if (printerSettings.filament && selFilament.querySelector(`option[value="${printerSettings.filament}"]`)) {
+    //                         selFilament.value = printerSettings.filament;
+    //                         if (currentSlicer === 'orca') {
+    //                             // Для Orca ничего дополнительно не делаем
+    //                         } else {
+    //                             updatePrintSettings();
+    //                         }
+    //
+    //                         setTimeout(() => {
+    //                             if (printerSettings.print && selPrint.querySelector(`option[value="${printerSettings.print}"]`)) {
+    //                                 selPrint.value = printerSettings.print;
+    //                             }
+    //                             setTimeout(() => {
+    //                                 calculatePACount();
+    //                                 updateConfigInfo();
+    //                                 checkGenerateReady();
+    //                             }, 50);
+    //                         }, 100);
+    //                     }
+    //                 }, 200);
+    //
+    //                 if (printerSettings.paSettings) {
+    //                     const pa = printerSettings.paSettings;
+    //                     if (pa.startPA !== undefined) document.getElementById('startPA').value = pa.startPA;
+    //                     if (pa.endPA !== undefined) document.getElementById('endPA').value = pa.endPA;
+    //                     if (pa.stepPA !== undefined) document.getElementById('stepPA').value = pa.stepPA;
+    //                     setTimeout(() => {
+    //                         calculatePACount();
+    //                         checkGenerateReady();
+    //                     }, 100);
+    //                 }
+    //             }
+    //         }
+    //     } catch (e) {
+    //         console.error('Ошибка загрузки настроек принтера:', e);
+    //     }
+    // }
 
     function saveSettings() {
         try {
@@ -1955,11 +1965,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if (currentSlicer === 'orca') {
-            updateOrcaConfigInfo(infoDiv);
-        } else {
+        // if (currentSlicer === 'orca') {
+        //     updateOrcaConfigInfo(infoDiv);
+        // } else {
             updateStandardConfigInfo(infoDiv);
-        }
+        // }
         checkGenerateReady();
     }
 
@@ -1998,15 +2008,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateStandardConfigInfo(info) {
         try {
-            // Проверяем, что это не Orca Slicer
-            if (currentSlicer === 'orca') {
-                updateOrcaConfigInfo(info);
-                return;
-            }
             const slicer = slicers[currentSlicer];
-            // const printerConfigPath = path.join(currentSlicerPath, 'printer', selectedPrinter.name + '.ini');
-            // const filamentConfigPath = path.join(currentSlicerPath, 'filament', selFilament.value + '.ini');
-            // const printConfigPath = path.join(currentSlicerPath, 'print', selPrint.value + '.ini');
 
             const printerConfig = slicer.printerConfig;
             const filamentConfig = slicer.filamentConfig;
@@ -2032,7 +2034,7 @@ document.addEventListener('DOMContentLoaded', () => {
             info.innerHTML = `
         <div class="config-details">
           <div><strong>Принтер:</strong> ${slicer.printerName}</div>
-          <div><strong>Диаметр сопла:</strong> ${printerConfig.nozzle_diameter?.split(';')[0] || 'Неизвестно'}мм</div>
+          <div><strong>Диаметр сопла:</strong> ${printerConfig.nozzle_diameter || 'Неизвестно'}мм</div>
           <div><strong>Размер стола:</strong> ${bedSize}</div>
           <div><strong>Тип филамента:</strong> ${filamentConfig.filament_type || 'Неизвестно'}</div>
           <div><strong>Температура сопла:</strong> ${filamentConfig.temperature || 'Неизвестно'}°C</div>
@@ -2042,6 +2044,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       `;
         } catch (e) {
+            console.error(e)
             info.innerHTML = '<p>Ошибка загрузки конфигурации</p>';
         }
     }

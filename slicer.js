@@ -40,6 +40,9 @@ class SlicerInfo {
                 this.print_host = phConfig.host;
                 this.physicalPrinteConfig = phConfig;
             }
+            if (this.slicerType === 'orca') {
+                this.print_host = physicalPrinter.print_host;
+            }
 
         }
         this.loadPrinterConfig();
@@ -137,14 +140,41 @@ class SlicerInfo {
         }
     }
 
+    getOrcaConfigType(configType) {
+        const mapping = {
+            'printer': 'machine',
+            'filament': 'filament',
+            'print': 'process'
+        };
+        return mapping[configType] || configType;
+    }
+
     loadConfig(configType, configName) {
-        if (this.slicerType === 'prusa' || this.slicerType === 'qidi') {
-            const printerConfigPath = path.join(this.fullPath, configType, configName + '.ini');
-            if (fs.existsSync(printerConfigPath)) {
-                return this.parseIniFile(printerConfigPath);
+        if (this.slicerType === 'orca') {
+            const orca = new OrcaIntegration();
+
+            if (configType === 'printer') {
+                return  orca.parser.convertPrinterConfig(configName);
+            } else if (configType === 'filament') {
+                return orca.parser.convertFilamentConfig(configName);
+            } else if (configType === 'print') {
+                // Для процессов пока возвращаем базовые значения
+                return orca.parser.convertProcessConfig(configName);
+            }
+        } else {
+            const configPath = path.join(this.fullPath, configType, configName + '.ini');
+            if (fs.existsSync(configPath)) {
+                return this.parseIniFile(configPath);
             }
         }
-        return [];
+        return {};
+        // if (this.slicerType === 'prusa' || this.slicerType === 'qidi') {
+        //     const printerConfigPath = path.join(this.fullPath, configType, configName + '.ini');
+        //     if (fs.existsSync(printerConfigPath)) {
+        //         return this.parseIniFile(printerConfigPath);
+        //     }
+        // }
+        // return [];
     }
 
     loadPrinterConfig() {
@@ -160,48 +190,51 @@ class SlicerInfo {
     }
 
     getCompatibleFilaments() {
-        const filamentPath = path.join(this.fullPath, 'filament');
         this.filaments = [];
+        if (!this._printerName) return;
 
-        // проверяем наличие пути и выбранность принтера
-        if (!fs.existsSync(filamentPath)) return;
-        if (!this._printerName || !this._printerName || this._printerName === '') {
-            return;
+        if (this.slicerType === 'orca') {
+            const orca = new OrcaIntegration();
+            const compatibleFilaments = orca.getCompatibleFilaments(this._printerName);
+            this.filaments = compatibleFilaments.map(f => f.name);
+        } else {
+            const filamentPath = path.join(this.fullPath, 'filament');
+            if (!fs.existsSync(filamentPath)) return;
+
+            const compatible = [];
+            const files = fs.readdirSync(filamentPath).filter(f => f.endsWith('.ini'));
+            files.forEach(file => {
+                const name = path.basename(file, '.ini');
+                if (this.checkCompatibility(name, 'filament')) {
+                    compatible.push(name);
+                }
+            });
+            this.filaments = compatible;
         }
-        // получили список файлов, теперь пробежимся по совместимости
-        const compatible = [];
-        const files = fs.readdirSync(filamentPath).filter(f => f.endsWith('.ini'));
-        files.forEach(file => {
-            const filamentConfig = this.parseIniFile(path.join(filamentPath, file));
-            const name = path.basename(file, '.ini');
-//            console.log(name,' | ',filamentConfig.compatible_printers_condition,' | ',filamentConfig.compatible_printers,' | ',filamentConfig.compatible_prints_condition,' | ',filamentConfig.compatible_prints);
-
-            if (this.checkCompatibility(name, 'filament')) {
-                compatible.push(name);
-            }
-        });
-        this.filaments = compatible;
     }
 
-    getCompatiblePrints(){
-        const printPath = path.join(this.fullPath, 'print');
+    getCompatiblePrints() {
         this.prints = [];
-        if(!fs.existsSync(printPath)) return;
-        if (!this._printerName || !this._printerName || this._printerName === '') {
-            return;
+        if (!this._printerName) return;
+
+        if (this.slicerType === 'orca') {
+            const orca = new OrcaIntegration();
+            const compatibleProcesses = orca.getCompatibleProcesses(this._printerName);
+            this.prints = compatibleProcesses.map(p => p.name);
+        } else {
+            const printPath = path.join(this.fullPath, 'print');
+            if (!fs.existsSync(printPath)) return;
+
+            const compatible = [];
+            const files = fs.readdirSync(printPath).filter(f => f.endsWith('.ini'));
+            files.forEach(file => {
+                const name = path.basename(file, '.ini');
+                if (this.checkCompatibility(name, 'print')) {
+                    compatible.push(name);
+                }
+            });
+            this.prints = compatible;
         }
-        const compatible = [];
-        const files = fs.readdirSync(printPath).filter(f => f.endsWith('.ini'));
-        files.forEach(file => {
-            const filamentConfig = this.parseIniFile(path.join(printPath, file));
-            const name = path.basename(file, '.ini');
-
-            if (this.checkCompatibility(name, 'print')) {
-                compatible.push(name);
-            }
-        });
-        this.prints = compatible;
-
     }
 
 
@@ -209,6 +242,11 @@ class SlicerInfo {
      * Проверка совместимости филамента с текущим профилем печати.
      */
     checkCompatibility(configName, configType) {
+        if (this.slicerType === 'orca') {
+            // Для Orca совместимость уже проверена в getCompatibleFilaments/Processes
+            return true;
+        }
+        
         if (this.slicerType === 'prusa' || this.slicerType === 'qidi') {
             const configPath = path.join(this.fullPath, configType, configName + '.ini');
             if (fs.existsSync(configPath)) {
@@ -217,6 +255,7 @@ class SlicerInfo {
                 const compatibleCondition = config.compatible_printers_condition || '';
                 const compatiblePrints = config.compatible_prints || '';
                 const compatiblePrintsCondition = config.compatible_prints_condition || '';
+                
                 if (!compatiblePrinters && !compatibleCondition && !compatiblePrints && !compatiblePrintsCondition) {
                     return true;
                 }
@@ -224,16 +263,13 @@ class SlicerInfo {
                 if (compatiblePrinters) {
                     const printers = compatiblePrinters.split(';').map(p => p.trim().replace(/"/g, ''));
                     if (!printers.includes(this._printerName)) {
-                        console.log('incompatible printer')
                         return false;
                     }
                 }
-                console.log(name,' | ',config.compatible_printers_condition,' | ',config.compatible_printers,' | ',config.compatible_prints_condition,' | ',config.compatible_prints);
 
                 if (compatibleCondition) {
                     try {
                         if (!this.evaluateCondition(compatibleCondition)) {
-                            console.log('not compatible condition');
                             return false;
                         }
                     } catch (e) {
@@ -241,10 +277,8 @@ class SlicerInfo {
                         return false;
                     }
                 }
-
             }
         }
-        console.log('compatible condition or printer');
         return true;
     }
 

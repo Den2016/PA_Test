@@ -47,6 +47,16 @@ class OrcaIntegration {
         }));
     }
 
+    // Получить совместимые филаменты для принтера
+    getCompatibleFilaments(printerName) {
+        return this.parser.getCompatibleFilaments(printerName);
+    }
+
+    // Получить совместимые процессы для принтера
+    getCompatibleProcesses(printerName) {
+        return this.parser.getCompatibleProcesses(printerName);
+    }
+
     // Получить конфигурацию для PA Test Generator
     getConfigForPATest(printerId, filamentId) {
         const printers = this.parser.getPrinters();
