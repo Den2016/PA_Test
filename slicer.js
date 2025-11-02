@@ -17,6 +17,7 @@ class SlicerInfo {
         this._filamentName = '';
         this._printName = '';
         this.print_host = '';
+        this.isPhysicalPrinter = false;
     }
 
     get printerName() {
@@ -43,6 +44,7 @@ class SlicerInfo {
             if (this.slicerType === 'orca') {
                 this.print_host = physicalPrinter.print_host;
             }
+            this.isPhysicalPrinter = true;
 
         }
         this.loadPrinterConfig();
@@ -188,6 +190,7 @@ class SlicerInfo {
     loadPrintConfig() {
         this.printConfig = this.loadConfig('print', this._printName)
     }
+
 
     getCompatibleFilaments() {
         this.filaments = [];

@@ -42,7 +42,7 @@ class DigitGenerator {
             }
             return parseFloat(value) || defaultValue;
         };
-        const useRelativeE = parseInt(configs.use_relative_e_distances?.[0] || '0') === 1;
+        const useRelativeE = parseInt(configs.use_relative_e_distances || '0') === 1;
         const travelSpeed = getConfigValue('travel_speed', 150) * 60; // мм/мин
         const perimeterSpeed = getConfigValue('external_perimeter_speed', 50) * 60; // мм/мин
 
@@ -81,7 +81,7 @@ class DigitGenerator {
 
                     if (coords[2] === 1) {
                         if (isRetracted) {
-                            if (configs.use_firmware_retraction?.[0] === '1') {
+                            if (configs.use_firmware_retraction === '1') {
                                 gcode.push('G11 ; Unretract');
                             } else {
                                 const retractLength = getConfigValue('retract_length', 0.8);
@@ -106,7 +106,7 @@ class DigitGenerator {
                         const distance = Math.sqrt(Math.pow(pointX - currentX, 2) + Math.pow(pointY - currentY, 2));
                         if (distance > 2.0) {
                             if (!isRetracted) {
-                                if (configs.use_firmware_retraction?.[0] === '1') {
+                                if (configs.use_firmware_retraction === '1') {
                                     gcode.push('G10 ; Retract');
                                 } else {
                                     const retractLength = getConfigValue('retract_length', 0.8);
@@ -154,14 +154,14 @@ class GCodeGenerator {
     addRetract(gcode, configs, extruder) {
         if (this.isRetracted) return;
         let extrusionAmount = 0;
-        const useFirmwareRetraction = parseInt(configs.use_firmware_retraction?.[0] || '0') === 1;
+        const useFirmwareRetraction = parseInt(configs.use_firmware_retraction || '0') === 1;
 
         if (useFirmwareRetraction) {
             gcode.push('G10 ; Retract');
         } else {
-            const retractLength = parseFloat(configs.retract_length?.[0] || '0.8');
-            const retractSpeed = parseFloat(configs.retract_speed?.[0] || '35') * 60;
-            if(parseInt(configs.use_relative_e_distances?.[0] || '0')===1){
+            const retractLength = parseFloat(configs.retract_length || '0.8');
+            const retractSpeed = parseFloat(configs.retract_speed || '35') * 60;
+            if(parseInt(configs.use_relative_e_distances || '0')===1){
                 extrusionAmount = 0-retractLength;
             }else{
                 extruder.currentE -= retractLength;
@@ -176,14 +176,14 @@ class GCodeGenerator {
     addDeretract(gcode, configs, extruder) {
         if (!this.isRetracted) return;
         let extrusionAmount = 0;
-        const useFirmwareRetraction = parseInt(configs.use_firmware_retraction?.[0] || '0') === 1;
+        const useFirmwareRetraction = parseInt(configs.use_firmware_retraction || '0') === 1;
 
         if (useFirmwareRetraction) {
             gcode.push('G11 ; Unretract');
         } else {
-            const retractLength = parseFloat(configs.retract_length?.[0] || '0.8');
-            const deretractSpeed = parseFloat(configs.deretract_speed?.[0] || '40') * 60;
-            if(parseInt(configs.use_relative_e_distances?.[0] || '0')===1){
+            const retractLength = parseFloat(configs.retract_length || '0.8');
+            const deretractSpeed = parseFloat(configs.deretract_speed || '40') * 60;
+            if(parseInt(configs.use_relative_e_distances || '0')===1){
                 extrusionAmount = retractLength;
             }else{
                 extruder.currentE += retractLength;
@@ -193,33 +193,6 @@ class GCodeGenerator {
         }
 
         this.isRetracted = false;
-    }
-
-    addTravelMove(gcode, x, y, configs, extruder) {
-        const distance = Math.sqrt(Math.pow(x - this.currentX, 2) + Math.pow(y - this.currentY, 2));
-        const retractBeforeTravel = parseFloat(configs.retract_before_travel?.[0] || '2');
-
-        const getConfigValue = (key, defaultValue) => {
-            const value = configs[key];
-            if (Array.isArray(value)) {
-                return parseFloat(value[0]) || defaultValue;
-            }
-            return parseFloat(value) || defaultValue;
-        };
-
-        const travelSpeed = getConfigValue('travel_speed', 150) * 60;
-
-        if (distance > retractBeforeTravel) {
-            this.addRetract(gcode, configs, extruder);
-        }
-
-        gcode.push(`G1 X${x.toFixed(5)} Y${y.toFixed(5)} F${travelSpeed}`);
-        this.currentX = x;
-        this.currentY = y;
-
-        if (distance > retractBeforeTravel) {
-            this.addDeretract(gcode, configs, extruder);
-        }
     }
 
     parseIniFile(filePath) {
@@ -248,6 +221,35 @@ class GCodeGenerator {
             return {};
         }
     }
+
+    addTravelMove(gcode, x, y, configs, extruder) {
+        const distance = Math.sqrt(Math.pow(x - this.currentX, 2) + Math.pow(y - this.currentY, 2));
+        const retractBeforeTravel = parseFloat(configs.retract_before_travel || '2');
+
+        const getConfigValue = (key, defaultValue) => {
+            const value = configs[key];
+            if (Array.isArray(value)) {
+                return parseFloat(value[0]) || defaultValue;
+            }
+            return parseFloat(value) || defaultValue;
+        };
+
+        const travelSpeed = getConfigValue('travel_speed', 150) * 60;
+
+        if (distance > retractBeforeTravel) {
+            this.addRetract(gcode, configs, extruder);
+        }
+
+        gcode.push(`G1 X${x.toFixed(5)} Y${y.toFixed(5)} F${travelSpeed}`);
+        this.currentX = x;
+        this.currentY = y;
+
+        if (distance > retractBeforeTravel) {
+            this.addDeretract(gcode, configs, extruder);
+        }
+    }
+
+
 
     calculateBedBounds(bedShape) {
         if (!bedShape) return null;
@@ -640,7 +642,7 @@ class GCodeGenerator {
         infillGcode.push(`;WIDTH:${extrusionWidth.toFixed(5)}`);
 
         const speeds = this.calculateSpeeds(configs, isFirstLayer, extruder, extrusionWidth, currentLayerHeight);
-        const travelSpeed = parseFloat(configs.travel_speed[0]) * 60;
+        const travelSpeed = parseFloat(configs.travel_speed) * 60;
 
         this.addTravelMove(infillGcode, points[0].x, points[0].y, configs, extruder);
 
@@ -655,7 +657,7 @@ class GCodeGenerator {
 
             let extrusionAmount = extruder.calculateExtrusion(distance, extrusionWidth, currentLayerHeight);
             extruder.currentE += extrusionAmount;
-            if (parseInt(configs.use_relative_e_distances?.[0] || '0') !== 1) extrusionAmount = extruder.currentE;
+            if (parseInt(configs.use_relative_e_distances || '0') !== 1) extrusionAmount = extruder.currentE;
             infillGcode.push(`G1 X${currentPoint.x.toFixed(5)} Y${currentPoint.y.toFixed(5)} E${extrusionAmount.toFixed(5)} F${speeds.infill}`);
             this.currentX = currentPoint.x;
             this.currentY = currentPoint.y;
@@ -682,7 +684,7 @@ class GCodeGenerator {
             const firstLayerSpeed = getConfigValue('first_layer_speed', '30');
             const firstLayerInfillSpeed = getConfigValue('first_layer_infill_speed', firstLayerSpeed);
 
-            if (firstLayerSpeed.endsWith('%')) {
+            if (typeof firstLayerSpeed === 'string' && firstLayerSpeed.endsWith('%')) {
                 speeds = {
                     external: this.parseSpeed(firstLayerSpeed, externalPerimeterSpeed),
                     perimeter: this.parseSpeed(firstLayerSpeed, perimeterSpeed),
@@ -773,7 +775,7 @@ class GCodeGenerator {
             }
             let extrusionAmount = extruder.calculateExtrusion(actualLength, extrusionWidth, currentLayerHeight);
             extruder.currentE += extrusionAmount;
-            if (parseInt(configs.use_relative_e_distances?.[0] || '0') !== 1) extrusionAmount = extruder.currentE
+            if (parseInt(configs.use_relative_e_distances || '0') !== 1) extrusionAmount = extruder.currentE
             const speeds = this.calculateSpeeds(configs, isFirstLayer, extruder, extrusionWidth, currentLayerHeight);
             const speed = isExternal ? speeds.external : speeds.perimeter;
             perimeterGcode.push(`G1 X${toX.toFixed(5)} Y${toY.toFixed(5)} E${extrusionAmount.toFixed(5)} F${speed}`);
@@ -1309,11 +1311,11 @@ class GCodeGenerator {
         return maxCols * maxRows;
     }
 
-    generatePAObjects(configProvider, printerName, filamentName, printName, paValues) {
-        const allConfigs = configProvider.getAllConfigs(printerName, filamentName, printName);
+    generatePAObjects(slicerInfo, paValues) {
+        const allConfigs = {...slicerInfo.printerConfig, ...slicerInfo.filamentConfig, ...slicerInfo.printConfig};
         this.variables = {...allConfigs};
 
-        const nozzleDiameter = parseFloat(this.variables.nozzle_diameter[0]);
+        const nozzleDiameter = parseFloat(this.variables.nozzle_diameter);
 
         // Определяем размеры объекта в зависимости от диаметра сопла
         let objectWidth, objectHeight;
@@ -1329,8 +1331,8 @@ class GCodeGenerator {
         }
         const spacing = 5;
 
-        const bedWidth = parseFloat(this.variables.print_bed_size[0]);
-        const bedHeight = parseFloat(this.variables.print_bed_size[1]);
+        const bedWidth = parseFloat(this.variables.print_bed_size?.[0] || this.variables.bed_size_x || '200');
+        const bedHeight = parseFloat(this.variables.print_bed_size?.[1] || this.variables.bed_size_y || '200');
 
         // Проверяем максимальное количество объектов
         const maxObjects = this.calculateMaxObjects(objectWidth, objectHeight, spacing, bedWidth, bedHeight);
@@ -1364,20 +1366,20 @@ class GCodeGenerator {
         this.variables.first_layer_print_min = [minX, minY];
         this.variables.first_layer_print_max = [maxX, maxY];
         this.variables.first_layer_print_size = [maxX - minX, maxY - minY];
-        const layerHeight = parseFloat(this.variables.layer_height[0]);
-        const firstLayerHeight = parseFloat(this.variables.first_layer_height[0]);
-        const filamentDiameter = parseFloat(this.variables.filament_diameter[0]);
+        const layerHeight = parseFloat(this.variables.layer_height);
+        const firstLayerHeight = parseFloat(this.variables.first_layer_height);
+        const filamentDiameter = parseFloat(this.variables.filament_diameter);
         // Поддерживаем как extrusion_multiplier (PrusaSlicer), так и filament_flow_ratio (OrcaSlicer)
-        const extrusionMultiplier = parseFloat(this.variables.extrusion_multiplier?.[0] || this.variables.filament_flow_ratio?.[0] || 1);
+        const extrusionMultiplier = parseFloat(this.variables.extrusion_multiplier || this.variables.filament_flow_ratio || 1);
 
         // Создаем экструдер и инициализируем ширины
-        const maxVolumetricSpeedValue = this.variables.max_volumetric_speed?.[0];
+        const maxVolumetricSpeedValue = this.variables.max_volumetric_speed;
         const maxVolumetricSpeed = maxVolumetricSpeedValue !== undefined ? parseFloat(maxVolumetricSpeedValue) : 15.0;
         const extruder = new Extruder(filamentDiameter, extrusionMultiplier, maxVolumetricSpeed);
         extruder.initializeWidths(this.variables, nozzleDiameter, layerHeight, firstLayerHeight);
 
         const infillExtrusionWidth = extruder.getExtrusionWidth('infill');
-        const overlapDistance = this.parseInfillOverlap(this.variables.infill_overlap?.[0] || '10%', infillExtrusionWidth);
+        const overlapDistance = this.parseInfillOverlap(this.variables.infill_overlap || '10%', infillExtrusionWidth);
 
         let gcode = [];
         const digitGenerator = new DigitGenerator();
@@ -1390,7 +1392,7 @@ class GCodeGenerator {
             gcode.push(`;Z:${currentZ.toFixed(5)}`);
             gcode.push(`;HEIGHT:${layerHeight.toFixed(5)}`);
             gcode.push(`G1 Z${currentZ.toFixed(5)} F300`);
-            if (parseInt(allConfigs.use_relative_e_distances?.[0] || '0') !== 1) {
+            if (parseInt(allConfigs.use_relative_e_distances || '0') !== 1) {
                 gcode.push('G92 E0');
                 extruder.currentE = 0;
             }
@@ -1467,21 +1469,14 @@ class GCodeGenerator {
         return gcode.join('\n');
     }
 
-    generate(slicerPath, printerName, filamentName, printName, paValues = null, isOrca = false) {
-        const slicerType = isOrca ? 'orca' : 'standard';
-        const configProvider = new ConfigProvider(slicerType, slicerPath);
-        const {
-            printerConfig,
-            filamentConfig,
-            printConfig
-        } = configProvider.getConfigs(printerName, filamentName, printName);
-        const allConfigs = {...printerConfig, ...filamentConfig, ...printConfig};
+    generate(slicerInfo, paValues = null) {
+        const allConfigs = {...slicerInfo.printerConfig, ...slicerInfo.filamentConfig, ...slicerInfo.printConfig};
 
         let objectsGCode = '';
 
         // Сначала генерируем объекты, чтобы получить переменные
         if (paValues && paValues.length > 0) {
-            objectsGCode = this.generatePAObjects(configProvider, printerName, filamentName, printName, paValues);
+            objectsGCode = this.generatePAObjects(slicerInfo, paValues);
 
             // Выводим полученные переменные в консоль
             console.log('=== Вычисленные переменные ===');
@@ -1499,21 +1494,21 @@ class GCodeGenerator {
         if (!configsWithVariables.enable_advance_pressure) configsWithVariables.enable_advance_pressure = ['0'];
         if (!configsWithVariables.advance_pressure) configsWithVariables.advance_pressure = ['0'];
         if (!configsWithVariables.smooth_time) configsWithVariables.smooth_time = ['0.04'];
-        const startGCode = this.processGCodeTemplate(printerConfig.start_gcode, configsWithVariables);
-        const filamentGCode = this.processGCodeTemplate(filamentConfig.start_filament_gcode, configsWithVariables);
-        const endFilamentGCode = this.processGCodeTemplate(filamentConfig.end_filament_gcode, configsWithVariables);
-        const endGCode = this.processGCodeTemplate(printerConfig.end_gcode, configsWithVariables);
+        const startGCode = this.processGCodeTemplate(slicerInfo.printerConfig.start_gcode, configsWithVariables);
+        const filamentGCode = this.processGCodeTemplate(slicerInfo.filamentConfig.start_filament_gcode, configsWithVariables);
+        const endFilamentGCode = this.processGCodeTemplate(slicerInfo.filamentConfig.end_filament_gcode, configsWithVariables);
+        const endGCode = this.processGCodeTemplate(slicerInfo.printerConfig.end_gcode, configsWithVariables);
 
         // Отладочный вывод
         console.log('=== Обработка шаблонов ===');
-        console.log('start_filament_gcode исходный:', filamentConfig.start_filament_gcode || 'отсутствует');
+        console.log('start_filament_gcode исходный:', slicerInfo.filamentConfig.start_filament_gcode || 'отсутствует');
         console.log('filamentGCode обработанный:', filamentGCode || 'пустой');
         console.log('enable_advance_pressure:', configsWithVariables.enable_advance_pressure);
         console.log('advance_pressure:', configsWithVariables.advance_pressure);
         console.log('smooth_time:', configsWithVariables.smooth_time);
         console.log('============================');
 
-        const useRelativeE = parseInt(allConfigs.use_relative_e_distances?.[0] || '0') === 1;
+        const useRelativeE = parseInt(allConfigs.use_relative_e_distances || '0') === 1;
 
         let result = [
             '; PA Test Generator',

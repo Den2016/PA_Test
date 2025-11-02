@@ -1033,14 +1033,16 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('beforeunload', saveSettings);
 
     function checkGenerateReady() {
-        const ready = selPrinter.value && selFilament.value && selPrint.value;
+        const slicer = slicers[currentSlicer];
+//        const ready = selPrinter.value && selFilament.value && selPrint.value;
+        const ready = slicer.printerConfig && slicer.filamentConfig && slicer.printConfig;
         document.getElementById('generateBtn').disabled = !ready;
     }
 
     function updateSendButton() {
         const hasGcode = document.getElementById('gcodeOutput').value.trim();
-        const isPhysicalPrinter = (selectedPrinter && selectedPrinter.type === 'physical') || (selectedPrinter.type == 'orca' && selectedPrinter.print_host);
-        document.getElementById('sendBtn').disabled = !hasGcode || !isPhysicalPrinter;
+        const slicer = slicers[currentSlicer];
+        document.getElementById('sendBtn').disabled = !hasGcode || !slicer.isPhysicalPrinter;
     }
 
     function calculatePrintTime() {
@@ -1624,6 +1626,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let gcode;
 
+            const slicer = slicers[currentSlicer]
             // Используем единый генератор для всех слайсеров
             const generator = new GCodeGenerator();
 
@@ -1631,14 +1634,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const gcodePlaceholders = calculateGCodePlaceholders();
             generator.setPlaceholders(gcodePlaceholders);
 
-            gcode = generator.generate(
-                currentSlicerPath,
-                selectedPrinter.name,
-                selFilament.value,
-                selPrint.value,
-                paValues,
-                currentSlicer === 'orca'
-            );
+            gcode = generator.generate(slicer, paValues);
 
 
             document.getElementById('gcodeOutput').value = gcode;
@@ -1651,15 +1647,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             saveSettings();
 
-            const orca = new OrcaIntegration();
-            let printers = orca.parser.getPrinters();
-            for (let i = 0; i < printers.length; i++) {
-                const printer = printers[i];
-                if ('*' + printer.name == selectedPrinter.name) { // не очень хорошо, но как уж есть....
-                    console.log('selectedPrinter', selectedPrinter);
-                    selectedPrinter.print_host = printer.print_host;
-                }
-            }
+            // const orca = new OrcaIntegration();
+            // let printers = orca.parser.getPrinters();
+            // for (let i = 0; i < printers.length; i++) {
+            //     const printer = printers[i];
+            //     if ('*' + printer.name == selectedPrinter.name) { // не очень хорошо, но как уж есть....
+            //         console.log('selectedPrinter', selectedPrinter);
+            //         selectedPrinter.print_host = printer.print_host;
+            //     }
+            // }
             updateSendButton();
 
 
@@ -1973,38 +1969,38 @@ document.addEventListener('DOMContentLoaded', () => {
         checkGenerateReady();
     }
 
-    function updateOrcaConfigInfo(info) {
-        try {
-            const orca = new OrcaIntegration();
-            const config = orca.getConfigForPATest(selectedPrinter.name, selFilament.value);
-
-            if (config) {
-                const maxVolumetricSpeed = config.filament.max_volumetric_speed || config.printer.max_volumetric_speed || 0;
-                const volumetricDisplay = maxVolumetricSpeed === 0 ? 'Отключено' : `${maxVolumetricSpeed} мм³/с`;
-
-                info.innerHTML = `
-          <div class="config-details">
-            <div><strong>Принтер:</strong> ${config.printer.printer_model}</div>
-            <div><strong>Диаметр сопла:</strong> ${config.printer.nozzle_diameter}мм</div>
-            <div><strong>Размер стола:</strong> ${config.printer.bed_size_x}×${config.printer.bed_size_y}мм</div>
-            <div><strong>Высота печати:</strong> ${config.printer.max_print_height}мм</div>
-            <div><strong>Тип филамента:</strong> ${config.filament.filament_type}</div>
-            <div><strong>Pressure Advance:</strong> ${config.filament.pressure_advance}</div>
-            <div><strong>Температура сопла:</strong> ${config.filament.nozzle_temperature}°C</div>
-            <div><strong>Температура стола:</strong> ${config.filament.bed_temperature}°C</div>
-            <div><strong>Объемный расход:</strong> ${volumetricDisplay}</div>
-            <div><strong>Flow Ratio:</strong> ${config.filament.flow_ratio}</div>
-            <div><strong>Диаметр филамента:</strong> ${config.filament.filament_diameter}мм</div>
-            <div><strong>G-code тип:</strong> ${config.printer.gcode_flavor}</div>
-          </div>
-        `;
-            } else {
-                info.innerHTML = '<p>Ошибка загрузки конфигурации</p>';
-            }
-        } catch (e) {
-            info.innerHTML = '<p>Ошибка: ' + e.message + '</p>';
-        }
-    }
+    // function updateOrcaConfigInfo(info) {
+    //     try {
+    //         const orca = new OrcaIntegration();
+    //         const config = orca.getConfigForPATest(selectedPrinter.name, selFilament.value);
+    //
+    //         if (config) {
+    //             const maxVolumetricSpeed = config.filament.max_volumetric_speed || config.printer.max_volumetric_speed || 0;
+    //             const volumetricDisplay = maxVolumetricSpeed === 0 ? 'Отключено' : `${maxVolumetricSpeed} мм³/с`;
+    //
+    //             info.innerHTML = `
+    //       <div class="config-details">
+    //         <div><strong>Принтер:</strong> ${config.printer.printer_model}</div>
+    //         <div><strong>Диаметр сопла:</strong> ${config.printer.nozzle_diameter}мм</div>
+    //         <div><strong>Размер стола:</strong> ${config.printer.bed_size_x}×${config.printer.bed_size_y}мм</div>
+    //         <div><strong>Высота печати:</strong> ${config.printer.max_print_height}мм</div>
+    //         <div><strong>Тип филамента:</strong> ${config.filament.filament_type}</div>
+    //         <div><strong>Pressure Advance:</strong> ${config.filament.pressure_advance}</div>
+    //         <div><strong>Температура сопла:</strong> ${config.filament.nozzle_temperature}°C</div>
+    //         <div><strong>Температура стола:</strong> ${config.filament.bed_temperature}°C</div>
+    //         <div><strong>Объемный расход:</strong> ${volumetricDisplay}</div>
+    //         <div><strong>Flow Ratio:</strong> ${config.filament.flow_ratio}</div>
+    //         <div><strong>Диаметр филамента:</strong> ${config.filament.filament_diameter}мм</div>
+    //         <div><strong>G-code тип:</strong> ${config.printer.gcode_flavor}</div>
+    //       </div>
+    //     `;
+    //         } else {
+    //             info.innerHTML = '<p>Ошибка загрузки конфигурации</p>';
+    //         }
+    //     } catch (e) {
+    //         info.innerHTML = '<p>Ошибка: ' + e.message + '</p>';
+    //     }
+    // }
 
     function updateStandardConfigInfo(info) {
         try {
@@ -2040,6 +2036,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div><strong>Температура сопла:</strong> ${filamentConfig.temperature || 'Неизвестно'}°C</div>
           <div><strong>Температура стола:</strong> ${filamentConfig.bed_temperature || 'Неизвестно'}°C</div>
           <div><strong>Высота слоя:</strong> ${printConfig.layer_height || 'Неизвестно'}мм</div>
+          <div><strong>Flow Ratio:</strong> ${filamentConfig.filament_flow_ratio}</div>
           <div><strong>Объемный расход:</strong> ${volumetricDisplay}</div>
         </div>
       `;
