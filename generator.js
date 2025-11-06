@@ -1049,64 +1049,77 @@ class GCodeGenerator {
         //     return `PA_Test_${printerName}_${startPA}-${endPA}_step${stepPA}.gcode`;
         // }
 
-        allConfigs.input_filename_base = 'PA_Test_'+startPA.toString()+'_'+endPA.toString()+'_'+stepPA.toString();
-        allConfigs.timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        allConfigs.year = new Date().getFullYear();
-        allConfigs.month = String(new Date().getMonth() + 1).padStart(2, '0');
-        allConfigs.day = String(new Date().getDate()).padStart(2, '0');
-        allConfigs.hour = String(new Date().getHours()).padStart(2, '0');
-        allConfigs.minute = String(new Date().getMinutes()).padStart(2, '0');
-        allConfigs.second = String(new Date().getSeconds()).padStart(2, '0');
-        allConfigs.default_output_extension = '.gcode';
-        allConfigs.version = '1.2.0';
-        allConfigs.print_time='time_unknown'
+        allConfigs.input_filename_base = ['PA_Test_'+startPA.toString()+'_'+endPA.toString()+'_'+stepPA.toString()];
+        allConfigs.timestamp = [new Date().toISOString().replace(/[:.]/g, '-')];
+        allConfigs.year = [new Date().getFullYear()];
+        allConfigs.month = [String(new Date().getMonth() + 1).padStart(2, '0')];
+        allConfigs.day = [String(new Date().getDate()).padStart(2, '0')];
+        allConfigs.hour = [String(new Date().getHours()).padStart(2, '0')];
+        allConfigs.minute = [String(new Date().getMinutes()).padStart(2, '0')];
+        allConfigs.second = [String(new Date().getSeconds()).padStart(2, '0')];
+        allConfigs.default_output_extension = ['.gcode'];
+        allConfigs.version = ['1.2.0'];
+        allConfigs.print_time=['time_unknown'];
 
 
-        let template = allConfigs.output_filename_format || '{input_filename_base}';
+        let template = allConfigs.output_filename_format?.[0] || '{input_filename_base}';
         template = template.replace(/\{([^}]+)\}/g, (match, expr) => {
-            // 1. Обработка digits(...)
-            const digitsMatch = expr.match(/^digits\(\s*([a-zA-Z_]\w*)\s*,\s*\d+\s*,\s*(\d+)\s*\)$/);
-            if (digitsMatch) {
-                const varName = digitsMatch[1];
-                const maxDigits = parseInt(digitsMatch[2], 10);
-                const value = allConfigs[varName];
-                if (value == null) {
-                    console.warn(`[Шаблон] Не найдена переменная: ${varName}`);
-                    return match;
+            try {
+                // 1. Обработка digits(varName, min, max)
+                const digitsMatch = expr.match(/^digits\(\s*([a-zA-Z_]\w*)\s*,\s*\d+\s*,\s*(\d+)\s*\)$/);
+                if (digitsMatch) {
+                    const varName = digitsMatch[1];
+                    const maxDigits = parseInt(digitsMatch[2], 10);
+                    const arr = allConfigs[varName];
+                    if (!Array.isArray(arr) || arr.length === 0) {
+                        console.warn(`[Шаблон] digits: ${varName} не массив или пуст`);
+                        return match;
+                    }
+                    const value = arr[0]; // всегда первый элемент для digits()
+                    const num = Number(value);
+                    if (isNaN(num)) {
+                        console.warn(`[Шаблон] digits: некорректное число в ${varName}[0]: ${value}`);
+                        return match;
+                    }
+                    return num.toFixed(maxDigits);
                 }
-                const num = Number(value);
-                if (isNaN(num)) {
-                    console.warn(`[Шаблон] Некорректное число в ${varName}: ${value}`);
-                    return match;
-                }
-                return num.toFixed(maxDigits);
-            }
 
-            // 2. Обработка var[0] → просто var
-            const arrayMatch = expr.match(/^([a-zA-Z_]\w*)\s*\[\s*0\s*\]$/);
-            if (arrayMatch) {
-                const varName = arrayMatch[1];
-                if (allConfigs[varName] !== undefined) {
-                    return String(allConfigs[varName]);
+                // 2. Обработка varName[index] — например, temperature[1]
+                const arrayAccessMatch = expr.match(/^([a-zA-Z_]\w*)\s*\[\s*(\d+)\s*\]$/);
+                if (arrayAccessMatch) {
+                    const varName = arrayAccessMatch[1];
+                    const index = parseInt(arrayAccessMatch[2], 10);
+                    const arr = allConfigs[varName];
+                    if (!Array.isArray(arr)) {
+                        console.warn(`[Шаблон] ${varName} не является массивом`);
+                        return match;
+                    }
+                    if (index >= arr.length) {
+                        console.warn(`[Шаблон] индекс ${index} выходит за пределы массива ${varName} (длина ${arr.length})`);
+                        return match;
+                    }
+                    return String(arr[index]);
                 }
-                console.warn(`[Шаблон] Не найдена переменная: ${varName}`);
+
+                // 3. Простое имя: {printer_model} → printer_model[0]
+                if (/^[a-zA-Z_]\w*$/.test(expr)) {
+                    const arr = allConfigs[expr];
+                    if (!Array.isArray(arr) || arr.length === 0) {
+                        console.warn(`[Шаблон] переменная ${expr} не массив или пуста`);
+                        return match;
+                    }
+                    return String(arr[0]);
+                }
+
+                // 4. Неизвестный синтаксис
+                console.warn(`[Шаблон] неизвестное выражение: ${expr}`);
+                return match;
+
+            } catch (e) {
+                console.error(`Ошибка при обработке выражения ${expr}:`, e);
                 return match;
             }
-
-            // 3. Простая переменная: {printer_model}
-            if (/^[a-zA-Z_]\w*$/.test(expr)) {
-                if (allConfigs[expr] !== undefined) {
-                    return String(allConfigs[expr]);
-                }
-                console.warn(`[Шаблон] Не найдена переменная: ${expr}`);
-                return match;
-            }
-
-            // 4. Неизвестный синтаксис — оставляем как есть
-            console.warn(`[Шаблон] Неизвестное выражение: ${expr}`);
-            return match;
         });
-
 
         template = template.replace(/[<>:"/\\|?*]/g, '_');
         return template.endsWith('.gcode') ? template : template + '.gcode';
@@ -1120,11 +1133,6 @@ class GCodeGenerator {
         // Сначала генерируем объекты, чтобы получить переменные
         if (paValues && paValues.length > 0) {
             objectsGCode = this.generatePAObjects(slicerInfo, paValues);
-        }
-
-        // Генерируем имя файла и сохраняем в SlicerInfo
-        if (paValues && paValues.length > 0) {
-            slicerInfo.outputFilename = this.generateFilename(slicerInfo, paValues);
         }
 
         // Теперь обрабатываем шаблоны с полученными переменными
@@ -1176,6 +1184,12 @@ class GCodeGenerator {
         result.push('; End G-code');
         result.push(endGCode);
         result.push(';');
+
+        // Генерируем имя файла и сохраняем в SlicerInfo
+        if (paValues && paValues.length > 0) {
+            slicerInfo.outputFilename = this.generateFilename(slicerInfo, paValues);
+        }
+
         return result.join('\n');
     }
 }
