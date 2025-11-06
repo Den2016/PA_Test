@@ -551,14 +551,14 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Нет G-code для отправки');
             return;
         }
+        const slicer = slicers[currentSlicer];
 
-        if ((!selectedPrinter || selectedPrinter.type !== 'physical') && !(selectedPrinter.type === 'orca' && typeof selectedPrinter.print_host === "string")) {
+        if (!slicer.print_host) {
             alert('Выберите физический принтер для отправки');
             return;
         }
 
         try {
-            const slicer = slicers[currentSlicer];
             showSendProgress('Подготовка к отправке...', 10);
 //            const physicalConfigPath = path.join(currentSlicerPath, 'physical_printer', selectedPrinter.physicalName + '.ini');
             let printerHost = slicer.print_host;

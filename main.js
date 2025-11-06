@@ -18,7 +18,7 @@ function createWindow() {
             contextIsolation: false
         },
     });
-    //win.setMenu(null); // <-- отключает меню
+    win.setMenu(null); // <-- отключает меню
 
     win.maximize();
     win.show();

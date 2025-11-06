@@ -204,7 +204,7 @@ class OrcaConfigParser {
         const userConfig = JSON.parse(fs.readFileSync(filament.file, 'utf8'));
         const systemConfig = this.getSystemConfig('filament', filament.inherits);
         const merged = { ...systemConfig, ...userConfig };
-
+        if(!merged.chamber_temperature) merged.chamber_temperature = [''];
         return this.convertArraysToValues(merged);
     }
 

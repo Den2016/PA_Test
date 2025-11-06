@@ -4,6 +4,82 @@ const Extruder = require('./extruder.js');
 const ConfigProvider = require('./config_provider.js');
 const extruder = require("./extruder");
 
+class PrintTimeEstimator {
+    constructor() {
+        this.currentX = 0;
+        this.currentY = 0;
+        this.currentZ = 0;
+        this.currentF = 1500;
+        this.totalTime = 0;
+    }
+
+    processLine(line) {
+        if (!line || line.startsWith(';')) return;
+
+        const moveMatch = line.match(/^G[01]\s/);
+        if (!moveMatch) return;
+
+        const coords = this.parseCoordinates(line);
+        const feedrate = this.parseFeedrate(line);
+
+        if (feedrate) this.currentF = feedrate;
+
+        const distance = this.calculateDistance(coords);
+        if (distance > 0) {
+            this.totalTime += (distance / this.currentF) * 60;
+        }
+
+        if (coords.X !== undefined) this.currentX = coords.X;
+        if (coords.Y !== undefined) this.currentY = coords.Y;
+        if (coords.Z !== undefined) this.currentZ = coords.Z;
+    }
+
+    parseCoordinates(line) {
+        const coords = {};
+        const xMatch = line.match(/X([-\d.]+)/);
+        const yMatch = line.match(/Y([-\d.]+)/);
+        const zMatch = line.match(/Z([-\d.]+)/);
+
+        if (xMatch) coords.X = parseFloat(xMatch[1]);
+        if (yMatch) coords.Y = parseFloat(yMatch[1]);
+        if (zMatch) coords.Z = parseFloat(zMatch[1]);
+
+        return coords;
+    }
+
+    parseFeedrate(line) {
+        const fMatch = line.match(/F([\d.]+)/);
+        return fMatch ? parseFloat(fMatch[1]) : null;
+    }
+
+    calculateDistance(coords) {
+        const dx = (coords.X !== undefined) ? coords.X - this.currentX : 0;
+        const dy = (coords.Y !== undefined) ? coords.Y - this.currentY : 0;
+        const dz = (coords.Z !== undefined) ? coords.Z - this.currentZ : 0;
+
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    formatTime() {
+        const hours = Math.floor(this.totalTime / 3600);
+        const minutes = Math.floor((this.totalTime % 3600) / 60);
+
+        if (hours > 0) {
+            return `${hours}h${minutes}m`;
+        } else {
+            return `${minutes}m`;
+        }
+    }
+
+    reset() {
+        this.currentX = 0;
+        this.currentY = 0;
+        this.currentZ = 0;
+        this.currentF = 1500;
+        this.totalTime = 0;
+    }
+}
+
 /**
  * Класс для генерации цифр PA на 4-м слое
  */
@@ -129,6 +205,26 @@ class GCodeGenerator {
         this.currentY = 0;
         this.isRetracted = false;
         this.dynamicPlaceholders = {};
+        this.timeEstimator = new PrintTimeEstimator();
+    }
+
+    addGCodeLine(gcode, line) {
+        gcode.push(line);
+        this.timeEstimator.processLine(line);
+    }
+
+    processLayerGCode(template, layerNum, layerZ, configs) {
+        if (!template) return '';
+
+        const layerVariables = {
+            ...configs,
+            layer_num: [layerNum],
+            layer_z: [layerZ.toFixed(5)],
+            previous_layer: [Math.max(0, layerNum - 1)],
+            next_layer: [layerNum + 1]
+        };
+
+        return this.processGCodeTemplate(template, layerVariables);
     }
 
     setPlaceholders(placeholders) {
@@ -224,7 +320,7 @@ class GCodeGenerator {
             this.addRetract(gcode, configs, extruder);
         }
 
-        gcode.push(`G1 X${x.toFixed(5)} Y${y.toFixed(5)} F${travelSpeed}`);
+        this.addGCodeLine(gcode, `G1 X${x.toFixed(5)} Y${y.toFixed(5)} F${travelSpeed}`);
         this.currentX = x;
         this.currentY = y;
 
@@ -275,6 +371,11 @@ class GCodeGenerator {
 
         // Заменяем экранированные \n на реальные переводы строк
         template = template.replace(/\\n/g, '\n');
+
+        // Нормализуем многострочные условия с учетом всех пробельных символов
+        template = template.replace(/\{\s*if\s+([^}]+?)\s*\}/gs, '{if $1}')
+                         .replace(/\{\s*else\s*\}/gs, '{else}')
+                         .replace(/\{\s*endif\s*\}/gs, '{endif}');
 
         this.variables = {...configs};
 
@@ -640,7 +741,7 @@ class GCodeGenerator {
             let extrusionAmount = extruder.calculateExtrusion(distance, extrusionWidth, currentLayerHeight);
             extruder.currentE += extrusionAmount;
             if (parseInt(configs.use_relative_e_distances || '0') !== 1) extrusionAmount = extruder.currentE;
-            infillGcode.push(`G1 X${currentPoint.x.toFixed(5)} Y${currentPoint.y.toFixed(5)} E${extrusionAmount.toFixed(5)} F${speeds.infill}`);
+            this.addGCodeLine(infillGcode, `G1 X${currentPoint.x.toFixed(5)} Y${currentPoint.y.toFixed(5)} E${extrusionAmount.toFixed(5)} F${speeds.infill}`);
             this.currentX = currentPoint.x;
             this.currentY = currentPoint.y;
         }
@@ -760,7 +861,7 @@ class GCodeGenerator {
             if (parseInt(configs.use_relative_e_distances || '0') !== 1) extrusionAmount = extruder.currentE
             const speeds = this.calculateSpeeds(configs, isFirstLayer, extruder, extrusionWidth, currentLayerHeight);
             const speed = isExternal ? speeds.external : speeds.perimeter;
-            perimeterGcode.push(`G1 X${toX.toFixed(5)} Y${toY.toFixed(5)} E${extrusionAmount.toFixed(5)} F${speed}`);
+            this.addGCodeLine(perimeterGcode, `G1 X${toX.toFixed(5)} Y${toY.toFixed(5)} E${extrusionAmount.toFixed(5)} F${speed}`);
             this.currentX = toX;
             this.currentY = toY;
         });
@@ -883,6 +984,7 @@ class GCodeGenerator {
     generatePAObjects(slicerInfo, paValues) {
         const allConfigs = {...slicerInfo.printerConfig, ...slicerInfo.filamentConfig, ...slicerInfo.printConfig};
         this.variables = {...allConfigs};
+        this.timeEstimator.reset();
 
         const nozzleDiameter = parseFloat(this.variables.nozzle_diameter);
 
@@ -955,12 +1057,40 @@ class GCodeGenerator {
 
         for (let layer = 0; layer < 25; layer++) {
             const currentZ = (layer + 1) * layerHeight;
+            const layerNum = layer + 1;
             const isOdd = (layer + 1) % 2 === 1;
+
+            const beforeLayerGCode = this.processLayerGCode(
+                allConfigs.before_layer_gcode,
+                layerNum,
+                currentZ,
+                allConfigs
+            );
+            if (beforeLayerGCode && beforeLayerGCode.trim()) {
+                const beforeLines = beforeLayerGCode.split('\n');
+                beforeLines.forEach(line => {
+                    if (line.trim()) gcode.push(line);
+                });
+            }
 
             gcode.push(';LAYER_CHANGE');
             gcode.push(`;Z:${currentZ.toFixed(5)}`);
             gcode.push(`;HEIGHT:${layerHeight.toFixed(5)}`);
-            gcode.push(`G1 Z${currentZ.toFixed(5)} F300`);
+            this.addGCodeLine(gcode, `G1 Z${currentZ.toFixed(5)} F300`);
+
+            const layerGCode = this.processLayerGCode(
+                allConfigs.layer_gcode,
+                layerNum,
+                currentZ,
+                allConfigs
+            );
+            if (layerGCode && layerGCode.trim()) {
+                const layerLines = layerGCode.split('\n');
+                layerLines.forEach(line => {
+                    if (line.trim()) gcode.push(line);
+                });
+            }
+
             if (parseInt(allConfigs.use_relative_e_distances || '0') !== 1) {
                 gcode.push('G92 E0');
                 extruder.currentE = 0;
@@ -1041,15 +1171,12 @@ class GCodeGenerator {
     generateFilename(slicerInfo, paValues) {
         const allConfigs = {...slicerInfo.printerConfig, ...slicerInfo.filamentConfig, ...slicerInfo.printConfig, ...this.variables, ...this.dynamicPlaceholders};
 
-        // if (slicerInfo.slicerType === 'orca') {
-             const startPA = paValues[0] || 0;
-             const endPA = paValues[paValues.length - 1] || 0;
-             const stepPA = paValues.length > 1 ? (paValues[1] - paValues[0]) : 0.001;
-        //     const printerName = slicerInfo.printerName.replace(/^\*/, '');
-        //     return `PA_Test_${printerName}_${startPA}-${endPA}_step${stepPA}.gcode`;
-        // }
+        const startPA = paValues[0] || 0;
+        const endPA = paValues[paValues.length - 1] || 0;
+        const stepPA = paValues.length > 1 ? (paValues[1] - paValues[0]) : 0.001;
 
-        allConfigs.input_filename_base = ['PA_Test_'+startPA.toString()+'_'+endPA.toString()+'_'+stepPA.toString()];
+
+        allConfigs.input_filename_base = ['PA_Test_' + startPA.toString() + '_' + endPA.toString() + '_' + stepPA.toString()];
         allConfigs.timestamp = [new Date().toISOString().replace(/[:.]/g, '-')];
         allConfigs.year = [new Date().getFullYear()];
         allConfigs.month = [String(new Date().getMonth() + 1).padStart(2, '0')];
@@ -1059,10 +1186,9 @@ class GCodeGenerator {
         allConfigs.second = [String(new Date().getSeconds()).padStart(2, '0')];
         allConfigs.default_output_extension = ['.gcode'];
         allConfigs.version = ['1.2.0'];
-        allConfigs.print_time=['time_unknown'];
 
 
-        let template = allConfigs.output_filename_format?.[0] || '{input_filename_base}';
+        let template = allConfigs.output_filename_format?.[0] || allConfigs.filename_format?.[0] || '{input_filename_base}';
         template = template.replace(/\{([^}]+)\}/g, (match, expr) => {
             try {
                 // 1. Обработка digits(varName, min, max)
@@ -1136,7 +1262,9 @@ class GCodeGenerator {
         }
 
         // Теперь обрабатываем шаблоны с полученными переменными
+        const printTimeFormatted = this.timeEstimator.formatTime();
         const configsWithVariables = {...allConfigs, ...this.variables, ...this.dynamicPlaceholders};
+        configsWithVariables.print_time = [printTimeFormatted];
 
         // Добавляем значения по умолчанию для отсутствующих переменных
         // if (!configsWithVariables.enable_advance_pressure) configsWithVariables.enable_advance_pressure = ['0'];
