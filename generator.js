@@ -54,22 +54,6 @@ class DigitGenerator {
         gcode.push(`; Digits PA: ${paValue}`);
         gcode.push(`G1 X${startX.toFixed(5)} Y${startY.toFixed(5)} F${travelSpeed} ; Начальная точка цифр`);
 
-
-
-        // if (configs.use_firmware_retraction?.[0] === '1') {
-        //     gcode.push('G11 ; Unretract');
-        // } else {
-        //     const retractLength = getConfigValue('retract_length', 0.8);
-        //     const deretractSpeed = getConfigValue('deretract_speed', 40) * 60;
-        //     if(!useRelativeE){
-        //         extruder.currentE=extruder.currentE+retractLength
-        //         extrusionAmount = extruder.currentE
-        //     }else{
-        //         extrusionAmount = retractLength
-        //     }
-        //     gcode.push(`G1 E${extrusionAmount.toFixed(5)} F${deretractSpeed} ; Unretract`);
-        // }
-
         for (const char of paValue.toString()) {
             if (this.digits[char]) {
                 const digit = this.digits[char];
@@ -86,10 +70,10 @@ class DigitGenerator {
                             } else {
                                 const retractLength = getConfigValue('retract_length', 0.8);
                                 const deretractSpeed = getConfigValue('deretract_speed', 40) * 60;
-                                if(useRelativeE){
+                                if (useRelativeE) {
                                     extrusionAmount = retractLength;
-                                }else{
-                                    extruder.currentE = extruder.currentE+retractLength
+                                } else {
+                                    extruder.currentE = extruder.currentE + retractLength
                                     extrusionAmount = extruder.currentE
                                 }
                                 gcode.push(`G1 E${extrusionAmount.toFixed(5)} F${deretractSpeed} ; Unretract`);
@@ -100,7 +84,7 @@ class DigitGenerator {
                         const distance = Math.sqrt(Math.pow(pointX - currentX, 2) + Math.pow(pointY - currentY, 2));
                         extrusionAmount = extruder.calculateExtrusion(distance, 0.4, 0.2);
                         extruder.currentE += extrusionAmount;
-                        if(!useRelativeE) extrusionAmount = extruder.currentE;
+                        if (!useRelativeE) extrusionAmount = extruder.currentE;
                         gcode.push(`G1 X${pointX.toFixed(5)} Y${pointY.toFixed(5)} E${extrusionAmount.toFixed(5)}`);
                     } else {
                         const distance = Math.sqrt(Math.pow(pointX - currentX, 2) + Math.pow(pointY - currentY, 2));
@@ -111,10 +95,10 @@ class DigitGenerator {
                                 } else {
                                     const retractLength = getConfigValue('retract_length', 0.8);
                                     const retractSpeed = getConfigValue('retract_speed', 35) * 60;
-                                    if(useRelativeE){
-                                        extrusionAmount = 0-retractLength;
-                                    }else{
-                                        extruder.currentE = extruder.currentE-retractLength;
+                                    if (useRelativeE) {
+                                        extrusionAmount = 0 - retractLength;
+                                    } else {
+                                        extruder.currentE = extruder.currentE - retractLength;
                                         extrusionAmount = extruder.currentE;
                                     }
                                     gcode.push(`G1 E${extrusionAmount.toFixed(5)} F${retractSpeed} ; Retract`);
@@ -161,9 +145,9 @@ class GCodeGenerator {
         } else {
             const retractLength = parseFloat(configs.retract_length || '0.8');
             const retractSpeed = parseFloat(configs.retract_speed || '35') * 60;
-            if(parseInt(configs.use_relative_e_distances || '0')===1){
-                extrusionAmount = 0-retractLength;
-            }else{
+            if (parseInt(configs.use_relative_e_distances || '0') === 1) {
+                extrusionAmount = 0 - retractLength;
+            } else {
                 extruder.currentE -= retractLength;
                 extrusionAmount = extruder.currentE;
             }
@@ -183,9 +167,9 @@ class GCodeGenerator {
         } else {
             const retractLength = parseFloat(configs.retract_length || '0.8');
             const deretractSpeed = parseFloat(configs.deretract_speed || '40') * 60;
-            if(parseInt(configs.use_relative_e_distances || '0')===1){
+            if (parseInt(configs.use_relative_e_distances || '0') === 1) {
                 extrusionAmount = retractLength;
-            }else{
+            } else {
                 extruder.currentE += retractLength;
                 extrusionAmount = extruder.currentE;
             }
@@ -250,7 +234,6 @@ class GCodeGenerator {
     }
 
 
-
     calculateBedBounds(bedShape) {
         if (!bedShape) return null;
 
@@ -312,14 +295,14 @@ class GCodeGenerator {
         }
 
         // Добавляем отсутствующие переменные
+        if (!this.variables.total_layer_count) {
+            this.variables.total_layer_count = 25; // Количество слоев PA теста
+        }
         if (!this.variables.max_layer_z) {
-            this.variables.max_layer_z = ['5.0']; // 25 слоев * 0.2мм
+            this.variables.max_layer_z = parseFloat(this.variables.first_layer_height) + parseFloat(this.variables.layer_height) * (parseFloat(this.variables.total_layer_count) - 1); // 25 слоев * 0.2мм
         }
         if (!this.variables.max_print_height) {
-            this.variables.max_print_height = ['250']; // По умолчанию
-        }
-        if (!this.variables.total_layer_count) {
-            this.variables.total_layer_count = ['25']; // Количество слоев PA теста
+            this.variables.max_print_height = 250; // По умолчанию
         }
 
         // Обрабатываем условные блоки построчно
@@ -376,8 +359,7 @@ class GCodeGenerator {
             const endifMatch = line.match(/\{endif\}/);
 
             if (ifMatch) {
-                const condition = ifMatch[1];
-                let evalCondition = condition;
+                let evalCondition = ifMatch[1];
 
                 // Заменяем переменные
                 for (const [key, value] of Object.entries(this.variables)) {
@@ -786,210 +768,6 @@ class GCodeGenerator {
         return perimeterGcode;
     }
 
-    // generateInfillOdd(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, configs, isFirstLayer = false) {
-    //     // Расчет границ области заполнения
-    //     const perimeterOffset = perimeterCount * extrusionWidth - overlapDistance;
-    //     const infillX1 = objX + perimeterOffset + extrusionWidth / 2; // Левая граница
-    //     const infillY1 = objY + perimeterOffset + extrusionWidth / 2; // Нижняя граница
-    //     const infillX2 = objX + objectWidth - perimeterOffset - extrusionWidth / 2; // Правая граница
-    //     const infillY2 = objY + objectHeight - perimeterOffset - extrusionWidth / 2; // Верхняя граница
-    //
-    //     let infillGcode = [];
-    //     infillGcode.push(';TYPE:Solid infill');
-    //     infillGcode.push(`;WIDTH:${extrusionWidth.toFixed(5)}`);
-    //
-    //     // Начальная точка - левый нижний угол области заполнения
-    //     let currentX = infillX1;
-    //     let currentY = infillY1;
-    //     const startX = infillX1; // Запоминаем начальную точку для расчета катетов
-    //     const startY = infillY1;
-    //
-    //     this.addTravelMove(infillGcode, currentX, currentY, configs);
-    //
-    //     const speeds = this.calculateSpeeds(configs, isFirstLayer, extruder, extrusionWidth, currentLayerHeight);
-    //
-    //     // Определяем короткое движение экструзии
-    //     const shortExtrude = extrusionWidth * 1.3275;
-    //
-    //     // ФАЗА 1: Движение снизу вверх с зигзагом
-    //     infillGcode.push('; phase 1 start');
-    //     while (true) {
-    //         // ШАГ 1: Делаем shortExtrude вправо (горизонтальный катет)
-    //         if (currentX + shortExtrude > infillX2) break; // Проверяем правую границу
-    //
-    //         const extrusionAmount1 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount1;
-    //         currentX += shortExtrude;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount1.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // ШАГ 2: Экструдируем гипотенузу влево-вверх
-    //         // Катет = расстояние от начальной точки по горизонтали
-    //         const horizontalCathet = currentX - startX;
-    //         const maxVerticalMove = infillY2 - currentY; // Максимально возможное движение вверх
-    //         const actualVerticalMove = Math.min(horizontalCathet, maxVerticalMove);
-    //
-    //         if (actualVerticalMove <= 0) break; // Достигли верхней границы
-    //
-    //         const diagonalLength = Math.sqrt(actualVerticalMove * actualVerticalMove + actualVerticalMove * actualVerticalMove);
-    //         const extrusionAmount2 = extruder.calculateExtrusion(diagonalLength, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount2;
-    //         currentX -= actualVerticalMove;
-    //         currentY += actualVerticalMove;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount2.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // Если достигли верхней границы, переходим к ФАЗЕ 2
-    //         if (currentY >= infillY2) break;
-    //
-    //         // ШАГ 3: Делаем shortExtrude вверх (вертикальный катет)
-    //         if (currentY + shortExtrude > infillY2) break; // Проверяем верхнюю границу
-    //
-    //         const extrusionAmount3 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount3;
-    //         currentY += shortExtrude;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount3.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // ШАГ 4: Экструдируем гипотенузу вправо-вниз
-    //         // Катет = расстояние от начальной точки по вертикали
-    //         const verticalCathet = currentY - startY;
-    //         const maxHorizontalMove = infillX2 - currentX; // Максимально возможное движение вправо
-    //         const actualHorizontalMove = Math.min(verticalCathet, maxHorizontalMove);
-    //
-    //         if (actualHorizontalMove <= 0) break; // Достигли правой границы
-    //
-    //         const diagonalLength2 = Math.sqrt(actualHorizontalMove * actualHorizontalMove + actualHorizontalMove * actualHorizontalMove);
-    //         const extrusionAmount4 = extruder.calculateExtrusion(diagonalLength2, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount4;
-    //         currentX += actualHorizontalMove;
-    //         currentY -= actualHorizontalMove;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount4.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // Если достигли правой границы, переходим к ФАЗЕ 3
-    //         if (currentX >= infillX2) break;
-    //     }
-    //     infillGcode.push('; phase 1 end');
-    //
-    //     // ФАЗА 2: Движение по верхней границе (если достигли верха)
-    //     if (currentY >= infillY2) {
-    //         infillGcode.push('; phase 2 start');
-    //         while (true) {
-    //             // ШАГ 5: Делаем shortExtrude вправо
-    //             if (currentX + shortExtrude > infillX2) break; // Проверяем правую границу
-    //
-    //             const extrusionAmount5 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount5;
-    //             currentX += shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount5.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 6: Экструдируем гипотенузу вправо-вниз
-    //             // В фазе 2 катет = высота области заполнения (перпендикулярно движению)
-    //             const verticalCathet = infillY2 - infillY1;
-    //             const maxDownMove = currentY - infillY1; // Максимально возможное движение вниз
-    //             const maxRightMove = infillX2 - currentX; // Максимально возможное движение вправо
-    //             const actualMove = Math.min(verticalCathet, Math.min(maxDownMove, maxRightMove));
-    //
-    //             if (actualMove <= 0) break;
-    //
-    //             const diagonalLength6 = Math.sqrt(actualMove * actualMove + actualMove * actualMove);
-    //             const extrusionAmount6 = extruder.calculateExtrusion(diagonalLength6, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount6;
-    //             currentX += actualMove;
-    //             currentY -= actualMove;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount6.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // Если достигли правой границы, переходим к ФАЗЕ 3
-    //             if (currentX >= infillX2) break;
-    //
-    //             // ШАГ 7: Делаем shortExtrude вправо
-    //             if (currentX + shortExtrude > infillX2) break;
-    //
-    //             const extrusionAmount7 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount7;
-    //             currentX += shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount7.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 8: Экструдируем гипотенузу влево-вверх
-    //             // В фазе 2 катет = высота области заполнения (перпендикулярно движению)
-    //             const verticalCathet2 = infillY2 - infillY1;
-    //             const maxUpMove = infillY2 - currentY;
-    //             const maxLeftMove = currentX - infillX1;
-    //             const actualMove2 = Math.min(verticalCathet2, Math.min(maxUpMove, maxLeftMove));
-    //
-    //             if (actualMove2 <= 0) break;
-    //
-    //             const diagonalLength8 = Math.sqrt(actualMove2 * actualMove2 + actualMove2 * actualMove2);
-    //             const extrusionAmount8 = extruder.calculateExtrusion(diagonalLength8, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount8;
-    //             currentX -= actualMove2;
-    //             currentY += actualMove2;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount8.toFixed(5)} F${speeds.infill}`);
-    //         }
-    //         infillGcode.push('; phase 2 end');
-    //     }
-    //
-    //     // ФАЗА 3: Движение по правой границе (если достигли правого края)
-    //     if (currentX >= infillX2 - shortExtrude) {
-    //         infillGcode.push(`; phase 3 start - current: ${currentX.toFixed(5)},${currentY.toFixed(5)} origin: ${infillX2.toFixed(5)},${infillY2.toFixed(5)}`);
-    //         // ШАГ 9: Устанавливаем новую начальную точку для фазы 3 (правый верхний угол)
-    //         const phase3StartX = infillX2;
-    //         const phase3StartY = infillY2;
-    //
-    //         while (true) {
-    //
-    //             // ШАГ 10: Делаем shortExtrude вверх
-    //             if (currentY + shortExtrude > infillY2) break; // Достигли верхней границы
-    //
-    //
-    //             const extrusionAmount10 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount10;
-    //             currentY += shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount10.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 11: Экструдируем гипотенузу влево-вверх
-    //             // Катет = расстояние от начальной точки фазы 3 по вертикали
-    //             const verticalCathet = phase3StartY - currentY;
-    //             const maxLeftMove11 = currentX - infillX1;
-    //             const maxUpMove11 = infillY2 - currentY;
-    //             const actualMove11 = Math.min(verticalCathet, Math.min(maxLeftMove11, maxUpMove11));
-    //
-    //             if (actualMove11 <= 0) break;
-    //
-    //             const diagonalLength11 = Math.sqrt(actualMove11 * actualMove11 + actualMove11 * actualMove11);
-    //             const extrusionAmount11 = extruder.calculateExtrusion(diagonalLength11, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount11;
-    //             currentX -= actualMove11;
-    //             currentY += actualMove11;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount11.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 12: Делаем shortExtrude вправо
-    //             if (currentX + shortExtrude > infillX2) break; // Достигли правой границы
-    //
-    //             const extrusionAmount12 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount12;
-    //             currentX += shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount12.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 13: Экструдируем гипотенузу вправо-вниз
-    //             // Катет = расстояние от начальной точки фазы 3 по горизонтали
-    //             const horizontalCathet = phase3StartX - currentX;
-    //             const maxRightMove13 = infillX2 - currentX;
-    //             const maxDownMove13 = currentY - infillY1;
-    //             const actualMove13 = Math.min(horizontalCathet, Math.min(maxRightMove13, maxDownMove13));
-    //
-    //             if (actualMove13 <= 0) break;
-    //
-    //             const diagonalLength13 = Math.sqrt(actualMove13 * actualMove13 + actualMove13 * actualMove13);
-    //             const extrusionAmount13 = extruder.calculateExtrusion(diagonalLength13, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount13;
-    //             currentX += actualMove13;
-    //             currentY -= actualMove13;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount13.toFixed(5)} F${speeds.infill}`);
-    //
-    //         }
-    //         infillGcode.push('; phase 3 end');
-    //     }
-    //
-    //     return infillGcode;
-    // }
 
     /**
      * Оптимизирует порядок печати объектов для минимизации холостых ходов
@@ -1050,215 +828,6 @@ class GCodeGenerator {
         return order;
     }
 
-    // generateInfillEven(objX, objY, objectWidth, objectHeight, currentLayerHeight, perimeterCount, extrusionWidth, overlapDistance, extruder, configs, isFirstLayer = false) {
-    //     // Расчет границ области заполнения
-    //     const perimeterOffset = perimeterCount * extrusionWidth - overlapDistance;
-    //     const infillX1 = objX + perimeterOffset + extrusionWidth / 2; // Левая граница
-    //     const infillY1 = objY + perimeterOffset + extrusionWidth / 2; // Нижняя граница
-    //     const infillX2 = objX + objectWidth - perimeterOffset - extrusionWidth / 2; // Правая граница
-    //     const infillY2 = objY + objectHeight - perimeterOffset - extrusionWidth / 2; // Верхняя граница
-    //
-    //     let infillGcode = [];
-    //     infillGcode.push(';TYPE:Solid infill');
-    //     infillGcode.push(`;WIDTH:${extrusionWidth.toFixed(5)}`);
-    //
-    //     // Начальная точка - правый нижний угол области заполнения
-    //     let currentX = infillX2;
-    //     let currentY = infillY1;
-    //     const startX = infillX2; // Запоминаем начальную точку для расчета катетов
-    //     const startY = infillY1;
-    //
-    //     this.addTravelMove(infillGcode, currentX, currentY, configs);
-    //
-    //     const speeds = this.calculateSpeeds(configs, isFirstLayer, extruder, extrusionWidth, currentLayerHeight);
-    //
-    //     // Определяем короткое движение экструзии
-    //     const shortExtrude = extrusionWidth * 1.3275;
-    //
-    //     // ФАЗА 1: Движение снизу вверх с зигзагом (начинаем справа)
-    //     infillGcode.push('; phase 1 start');
-    //     while (true) {
-    //         // ШАГ 1: Делаем shortExtrude влево (горизонтальный катет)
-    //         if (currentX - shortExtrude < infillX1) break; // Проверяем левую границу
-    //
-    //         const extrusionAmount1 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount1;
-    //         currentX -= shortExtrude;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount1.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // ШАГ 2: Экструдируем гипотенузу вправо-вверх
-    //         // Катет = расстояние от начальной точки по горизонтали
-    //         const horizontalCathet = startX - currentX;
-    //         const maxVerticalMove = infillY2 - currentY; // Максимально возможное движение вверх
-    //         const actualVerticalMove = Math.min(horizontalCathet, maxVerticalMove);
-    //
-    //         if (actualVerticalMove <= 0) break; // Достигли верхней границы
-    //
-    //         const diagonalLength = Math.sqrt(actualVerticalMove * actualVerticalMove + actualVerticalMove * actualVerticalMove);
-    //         const extrusionAmount2 = extruder.calculateExtrusion(diagonalLength, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount2;
-    //         currentX += actualVerticalMove;
-    //         currentY += actualVerticalMove;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount2.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // Если достигли верхней границы, переходим к ФАЗЕ 2
-    //         if (currentY >= infillY2) break;
-    //
-    //         // ШАГ 3: Делаем shortExtrude вверх (вертикальный катет)
-    //         if (currentY + shortExtrude > infillY2) break; // Проверяем верхнюю границу
-    //
-    //         const extrusionAmount3 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount3;
-    //         currentY += shortExtrude;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount3.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // ШАГ 4: Экструдируем гипотенузу влево-вниз
-    //         // Катет = расстояние от начальной точки по вертикали
-    //         const verticalCathet = currentY - startY;
-    //         const maxHorizontalMove = currentX - infillX1; // Максимально возможное движение влево
-    //         const actualHorizontalMove = Math.min(verticalCathet, maxHorizontalMove);
-    //
-    //         if (actualHorizontalMove <= 0) break; // Достигли левой границы
-    //
-    //         const diagonalLength2 = Math.sqrt(actualHorizontalMove * actualHorizontalMove + actualHorizontalMove * actualHorizontalMove);
-    //         const extrusionAmount4 = extruder.calculateExtrusion(diagonalLength2, extrusionWidth, currentLayerHeight);
-    //         extruder.currentE += extrusionAmount4;
-    //         currentX -= actualHorizontalMove;
-    //         currentY -= actualHorizontalMove;
-    //         infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount4.toFixed(5)} F${speeds.infill}`);
-    //
-    //         // Если достигли левой границы, переходим к ФАЗЕ 3
-    //         if (currentX <= infillX1) break;
-    //     }
-    //     infillGcode.push('; phase 1 end');
-    //
-    //     // ФАЗА 2: Движение по верхней границе (если достигли верха)
-    //     if (currentY >= infillY2) {
-    //         infillGcode.push('; phase 2 start');
-    //         while (true) {
-    //             // ШАГ 5: Делаем shortExtrude влево
-    //             if (currentX - shortExtrude < infillX1) break; // Проверяем левую границу
-    //
-    //             const extrusionAmount5 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount5;
-    //             currentX -= shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount5.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 6: Экструдируем гипотенузу влево-вниз
-    //             // В фазе 2 катет = высота области заполнения (перпендикулярно движению)
-    //             const verticalCathet = infillY2 - infillY1;
-    //             const maxDownMove = currentY - infillY1; // Максимально возможное движение вниз
-    //             const maxLeftMove = currentX - infillX1; // Максимально возможное движение влево
-    //             const actualMove = Math.min(verticalCathet, Math.min(maxDownMove, maxLeftMove));
-    //
-    //             if (actualMove <= 0) break;
-    //
-    //             const diagonalLength6 = Math.sqrt(actualMove * actualMove + actualMove * actualMove);
-    //             const extrusionAmount6 = extruder.calculateExtrusion(diagonalLength6, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount6;
-    //             currentX -= actualMove;
-    //             currentY -= actualMove;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount6.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // Если достигли левой границы, переходим к ФАЗЕ 3
-    //             if (currentX <= infillX1) break;
-    //
-    //             // ШАГ 7: Делаем shortExtrude влево
-    //             if (currentX - shortExtrude < infillX1) break;
-    //
-    //             const extrusionAmount7 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount7;
-    //             currentX -= shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount7.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 8: Экструдируем гипотенузу вправо-вверх
-    //             // В фазе 2 катет = высота области заполнения (перпендикулярно движению)
-    //             const verticalCathet2 = infillY2 - infillY1;
-    //             const maxUpMove = infillY2 - currentY;
-    //             const maxRightMove = infillX2 - currentX;
-    //             const actualMove2 = Math.min(verticalCathet2, Math.min(maxUpMove, maxRightMove));
-    //
-    //             if (actualMove2 <= 0) break;
-    //
-    //             const diagonalLength8 = Math.sqrt(actualMove2 * actualMove2 + actualMove2 * actualMove2);
-    //             const extrusionAmount8 = extruder.calculateExtrusion(diagonalLength8, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount8;
-    //             currentX += actualMove2;
-    //             currentY += actualMove2;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount8.toFixed(5)} F${speeds.infill}`);
-    //         }
-    //         infillGcode.push('; phase 2 end');
-    //     }
-    //
-    //     // ФАЗА 3: Движение по левой границе (если достигли левого края)
-    //     if (currentX <= infillX1 + shortExtrude) {
-    //         infillGcode.push(`; phase 3 start - current: ${currentX.toFixed(5)},${currentY.toFixed(5)} origin: ${infillX1.toFixed(5)},${infillY2.toFixed(5)}`);
-    //         // ШАГ 9: Устанавливаем новую начальную точку для фазы 3 (левый верхний угол)
-    //         const phase3StartX = infillX1;
-    //         const phase3StartY = infillY2;
-    //
-    //
-    //         // Временно уменьшаем extrusionWidth для запуска одного цикла фазы 3
-    //         const originalExtrusionWidth = extrusionWidth;
-    //         const reducedExtrusionWidth = extrusionWidth;// currentX - infillX1; // Разница между текущим X и левой границей
-    //
-    //         while (true) {
-    //
-    //             // ШАГ 10: Делаем shortExtrude вверх
-    //             if (currentY + shortExtrude > infillY2) break; // Достигли верхней границы
-    //
-    //
-    //             const extrusionAmount10 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount10;
-    //             currentY += shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount10.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 11: Экструдируем гипотенузу вправо-вверх
-    //             // Катет = расстояние от начальной точки фазы 3 по вертикали
-    //             const verticalCathet = phase3StartY - currentY;
-    //             const maxRightMove11 = infillX2 - currentX;
-    //             const maxUpMove11 = infillY2 - currentY;
-    //             const actualMove11 = Math.min(verticalCathet, Math.min(maxRightMove11, maxUpMove11));
-    //
-    //             if (actualMove11 <= 0) break;
-    //
-    //             const diagonalLength11 = Math.sqrt(actualMove11 * actualMove11 + actualMove11 * actualMove11);
-    //             const extrusionAmount11 = extruder.calculateExtrusion(diagonalLength11, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount11;
-    //             currentX += actualMove11;
-    //             currentY += actualMove11;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount11.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 12: Делаем shortExtrude влево
-    //             if (currentX - shortExtrude < infillX1) break; // Достигли левой границы
-    //
-    //             const extrusionAmount12 = extruder.calculateExtrusion(shortExtrude, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount12;
-    //             currentX -= shortExtrude;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount12.toFixed(5)} F${speeds.infill}`);
-    //
-    //             // ШАГ 13: Экструдируем гипотенузу влево-вниз
-    //             // Катет = расстояние от начальной точки фазы 3 по горизонтали
-    //             const horizontalCathet = currentX - phase3StartX;
-    //             const maxLeftMove13 = currentX - infillX1;
-    //             const maxDownMove13 = currentY - infillY1;
-    //             const actualMove13 = Math.min(horizontalCathet, Math.min(maxLeftMove13, maxDownMove13));
-    //
-    //             if (actualMove13 <= 0) break;
-    //
-    //             const diagonalLength13 = Math.sqrt(actualMove13 * actualMove13 + actualMove13 * actualMove13);
-    //             const extrusionAmount13 = extruder.calculateExtrusion(diagonalLength13, extrusionWidth, currentLayerHeight);
-    //             extruder.currentE += extrusionAmount13;
-    //             currentX -= actualMove13;
-    //             currentY -= actualMove13;
-    //             infillGcode.push(`G1 X${currentX.toFixed(5)} Y${currentY.toFixed(5)} E${extrusionAmount13.toFixed(5)} F${speeds.infill}`);
-    //
-    //         }
-    //         infillGcode.push('; phase 3 end');
-    //     }
-    //
-    //     return infillGcode;
-    // }
 
     /**
      * Рассчитывает оптимальное расположение объектов на столе
@@ -1469,6 +1038,80 @@ class GCodeGenerator {
         return gcode.join('\n');
     }
 
+    generateFilename(slicerInfo, paValues) {
+        const allConfigs = {...slicerInfo.printerConfig, ...slicerInfo.filamentConfig, ...slicerInfo.printConfig, ...this.variables, ...this.dynamicPlaceholders};
+
+        // if (slicerInfo.slicerType === 'orca') {
+             const startPA = paValues[0] || 0;
+             const endPA = paValues[paValues.length - 1] || 0;
+             const stepPA = paValues.length > 1 ? (paValues[1] - paValues[0]) : 0.001;
+        //     const printerName = slicerInfo.printerName.replace(/^\*/, '');
+        //     return `PA_Test_${printerName}_${startPA}-${endPA}_step${stepPA}.gcode`;
+        // }
+
+        allConfigs.input_filename_base = 'PA_Test_'+startPA.toString()+'_'+endPA.toString()+'_'+stepPA.toString();
+        allConfigs.timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        allConfigs.year = new Date().getFullYear();
+        allConfigs.month = String(new Date().getMonth() + 1).padStart(2, '0');
+        allConfigs.day = String(new Date().getDate()).padStart(2, '0');
+        allConfigs.hour = String(new Date().getHours()).padStart(2, '0');
+        allConfigs.minute = String(new Date().getMinutes()).padStart(2, '0');
+        allConfigs.second = String(new Date().getSeconds()).padStart(2, '0');
+        allConfigs.default_output_extension = '.gcode';
+        allConfigs.version = '1.2.0';
+        allConfigs.print_time='time_unknown'
+
+
+        let template = allConfigs.output_filename_format || '{input_filename_base}';
+        template = template.replace(/\{([^}]+)\}/g, (match, expr) => {
+            // 1. Обработка digits(...)
+            const digitsMatch = expr.match(/^digits\(\s*([a-zA-Z_]\w*)\s*,\s*\d+\s*,\s*(\d+)\s*\)$/);
+            if (digitsMatch) {
+                const varName = digitsMatch[1];
+                const maxDigits = parseInt(digitsMatch[2], 10);
+                const value = allConfigs[varName];
+                if (value == null) {
+                    console.warn(`[Шаблон] Не найдена переменная: ${varName}`);
+                    return match;
+                }
+                const num = Number(value);
+                if (isNaN(num)) {
+                    console.warn(`[Шаблон] Некорректное число в ${varName}: ${value}`);
+                    return match;
+                }
+                return num.toFixed(maxDigits);
+            }
+
+            // 2. Обработка var[0] → просто var
+            const arrayMatch = expr.match(/^([a-zA-Z_]\w*)\s*\[\s*0\s*\]$/);
+            if (arrayMatch) {
+                const varName = arrayMatch[1];
+                if (allConfigs[varName] !== undefined) {
+                    return String(allConfigs[varName]);
+                }
+                console.warn(`[Шаблон] Не найдена переменная: ${varName}`);
+                return match;
+            }
+
+            // 3. Простая переменная: {printer_model}
+            if (/^[a-zA-Z_]\w*$/.test(expr)) {
+                if (allConfigs[expr] !== undefined) {
+                    return String(allConfigs[expr]);
+                }
+                console.warn(`[Шаблон] Не найдена переменная: ${expr}`);
+                return match;
+            }
+
+            // 4. Неизвестный синтаксис — оставляем как есть
+            console.warn(`[Шаблон] Неизвестное выражение: ${expr}`);
+            return match;
+        });
+
+
+        template = template.replace(/[<>:"/\\|?*]/g, '_');
+        return template.endsWith('.gcode') ? template : template + '.gcode';
+    }
+
     generate(slicerInfo, paValues = null) {
         const allConfigs = {...slicerInfo.printerConfig, ...slicerInfo.filamentConfig, ...slicerInfo.printConfig};
 
@@ -1477,36 +1120,25 @@ class GCodeGenerator {
         // Сначала генерируем объекты, чтобы получить переменные
         if (paValues && paValues.length > 0) {
             objectsGCode = this.generatePAObjects(slicerInfo, paValues);
+        }
 
-            // Выводим полученные переменные в консоль
-            console.log('=== Вычисленные переменные ===');
-            console.log('total_layer_count:', this.variables.total_layer_count);
-            console.log('first_layer_print_min:', this.variables.first_layer_print_min);
-            console.log('first_layer_print_max:', this.variables.first_layer_print_max);
-            console.log('first_layer_print_size:', this.variables.first_layer_print_size);
-            console.log('==============================');
+        // Генерируем имя файла и сохраняем в SlicerInfo
+        if (paValues && paValues.length > 0) {
+            slicerInfo.outputFilename = this.generateFilename(slicerInfo, paValues);
         }
 
         // Теперь обрабатываем шаблоны с полученными переменными
         const configsWithVariables = {...allConfigs, ...this.variables, ...this.dynamicPlaceholders};
 
         // Добавляем значения по умолчанию для отсутствующих переменных
-        if (!configsWithVariables.enable_advance_pressure) configsWithVariables.enable_advance_pressure = ['0'];
-        if (!configsWithVariables.advance_pressure) configsWithVariables.advance_pressure = ['0'];
-        if (!configsWithVariables.smooth_time) configsWithVariables.smooth_time = ['0.04'];
+        // if (!configsWithVariables.enable_advance_pressure) configsWithVariables.enable_advance_pressure = ['0'];
+        // if (!configsWithVariables.advance_pressure) configsWithVariables.advance_pressure = ['0'];
+        // if (!configsWithVariables.smooth_time) configsWithVariables.smooth_time = ['0.04'];
         const startGCode = this.processGCodeTemplate(slicerInfo.printerConfig.start_gcode, configsWithVariables);
         const filamentGCode = this.processGCodeTemplate(slicerInfo.filamentConfig.start_filament_gcode, configsWithVariables);
         const endFilamentGCode = this.processGCodeTemplate(slicerInfo.filamentConfig.end_filament_gcode, configsWithVariables);
         const endGCode = this.processGCodeTemplate(slicerInfo.printerConfig.end_gcode, configsWithVariables);
 
-        // Отладочный вывод
-        console.log('=== Обработка шаблонов ===');
-        console.log('start_filament_gcode исходный:', slicerInfo.filamentConfig.start_filament_gcode || 'отсутствует');
-        console.log('filamentGCode обработанный:', filamentGCode || 'пустой');
-        console.log('enable_advance_pressure:', configsWithVariables.enable_advance_pressure);
-        console.log('advance_pressure:', configsWithVariables.advance_pressure);
-        console.log('smooth_time:', configsWithVariables.smooth_time);
-        console.log('============================');
 
         const useRelativeE = parseInt(allConfigs.use_relative_e_distances || '0') === 1;
 

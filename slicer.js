@@ -18,6 +18,7 @@ class SlicerInfo {
         this._printName = '';
         this.print_host = '';
         this.isPhysicalPrinter = false;
+        this.outputFilename = "";
     }
 
     get printerName() {
@@ -25,6 +26,8 @@ class SlicerInfo {
     }
 
     set printerName(printerName) {
+        this.physicalPrinterName = ''
+        this.isPhysicalPrinter = false;
         const printer = this.printers.find(p => p.name === printerName);
         const physicalPrinter = this.physicalPrinters.find(p => p.name === printerName);
         if (printer) {
@@ -38,7 +41,7 @@ class SlicerInfo {
 
             if (this.slicerType === 'prusa' || this.slicerType === 'qidi') {
                 const phConfig = this.parseIniFile(path.join(this.fullPath, 'physical_printer', this.physicalPrinterName + '.ini'))
-                this.print_host = phConfig.host;
+                this.print_host = phConfig.print_host;
                 this.physicalPrinteConfig = phConfig;
             }
             if (this.slicerType === 'orca') {
@@ -170,17 +173,43 @@ class SlicerInfo {
             }
         }
         return {};
-        // if (this.slicerType === 'prusa' || this.slicerType === 'qidi') {
-        //     const printerConfigPath = path.join(this.fullPath, configType, configName + '.ini');
-        //     if (fs.existsSync(printerConfigPath)) {
-        //         return this.parseIniFile(printerConfigPath);
-        //     }
-        // }
-        // return [];
     }
 
     loadPrinterConfig() {
         this.printerConfig = this.loadConfig('printer', this._printerName);
+        const bedShape = this.printerConfig.bed_shape || '';
+        if (bedShape) {
+            const points = bedShape.split(',').map(point => {
+                const [x, y] = point.split('x').map(Number);
+                return {x, y};
+            });
+            const xs = points.map(p => p.x);
+            const ys = points.map(p => p.y);
+            const bedWidth = Math.max(...xs) - Math.min(...xs);
+            const bedHeight = Math.max(...ys) - Math.min(...ys);
+            this.bed = {
+                bedShape: bedShape,
+                bedWidth: bedWidth,
+                bedHeight: bedHeight
+            }
+        }
+        let objectWidth, objectHeight;
+        if (this.printerConfig.nozzleDiameter <= 0.4) {
+            objectWidth = 30;
+            objectHeight = 20;
+        } else if (this.printerConfig.nozzleDiameter <= 0.6) {
+            objectWidth = 35;
+            objectHeight = 25;
+        } else {
+            objectWidth = 40;
+            objectHeight = 30;
+        }
+        this.objectSize = {
+            width: objectWidth,
+            height: objectHeight
+        }
+
+
     }
 
     loadFilamentConfig() {
@@ -206,12 +235,12 @@ class SlicerInfo {
 
             const compatible = [];
             const files = fs.readdirSync(filamentPath).filter(f => f.endsWith('.ini'));
-            files.forEach(file => {
+            for (let file of files) {
                 const name = path.basename(file, '.ini');
                 if (this.checkCompatibility(name, 'filament')) {
                     compatible.push(name);
                 }
-            });
+            }
             this.filaments = compatible;
         }
     }

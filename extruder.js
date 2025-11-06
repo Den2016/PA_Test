@@ -168,7 +168,7 @@ class Extruder {
     const maxSpeed = this.getMaxSpeedForCrossSection(crossSection);
     
     if (requestedSpeed > maxSpeed) {
-      console.warn(`Скорость ${requestedSpeed.toFixed(1)} мм/с ограничена до ${maxSpeed.toFixed(1)} мм/с по объемному расходу`);
+      //console.warn(`Скорость ${requestedSpeed.toFixed(1)} мм/с ограничена до ${maxSpeed.toFixed(1)} мм/с по объемному расходу`);
       return maxSpeed;
     }
     

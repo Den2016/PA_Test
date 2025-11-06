@@ -17,8 +17,8 @@ function createWindow() {
             nodeIntegration: true,
             contextIsolation: false
         },
-        devTools: true
     });
+    //win.setMenu(null); // <-- отключает меню
 
     win.maximize();
     win.show();
@@ -41,6 +41,5 @@ app.on('activate', () => {
 
 // Обработчик IPC для диалога сохранения файла
 ipcMain.handle('save-file-dialog', async (event, options) => {
-    const result = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow(), options);
-    return result;
+    return await dialog.showSaveDialog(BrowserWindow.getFocusedWindow(), options);
 });
